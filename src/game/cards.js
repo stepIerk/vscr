@@ -43,24 +43,21 @@ function upgradeCard(key) {
     kind: 'upgrade',
     upgrade: key,
     title: u.name,
-    tag: u.target === 'hero' ? 'Hero upgrade' : 'Colony upgrade',
+    tag: u.target === 'hero' ? 'Hero upgrade' : u.target === 'colony' ? 'Colony upgrade' : 'Upgrade',
     desc: u.desc
   };
 }
 
-/** All cards, in stable order. */
+/**
+ * All cards, in stable order. Mutations and upgrades are generated from the
+ * config tables, so adding a config entry automatically creates its card.
+ */
 export const CARDS = [
   cellCard('hunter'),
   cellCard('defender'),
   cellCard('parasite'),
-  mutationCard('metabolism'),
-  mutationCard('membrane'),
-  mutationCard('acid'),
-  upgradeCard('pulse'),
-  upgradeCard('regen'),
-  upgradeCard('adaptation'),
-  upgradeCard('sync'),
-  upgradeCard('swift')
+  ...Object.keys(MUTATIONS).map(mutationCard),
+  ...Object.keys(UPGRADES).map(upgradeCard)
 ];
 
 export const CARD_BY_ID = Object.fromEntries(CARDS.map((c) => [c.id, c]));

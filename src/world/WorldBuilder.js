@@ -17,16 +17,20 @@ export class WorldBuilder {
     this.pal = palette;
     this.bodies = [];
     this.pulsers = [];
+    this.floorGfx = [];
+    this.wallGfx = null;
+    this.voidRect = null;
   }
 
   build() {
     const { bounds } = this.layout;
     this.buildVoid(bounds);
-    this.buildFloors();
+    this.buildFloors(this.layout.rooms, this.layout.corridors.flatMap((c) => c.rects), 0x51f3);
     this.buildWalls();
     this.buildBodies();
-    this.buildDecor();
+    this.buildDecor(this.layout.rooms, 0xa53c);
     return {
+      builder: this,
       bodies: this.bodies,
       bounds,
       start: { x: this.layout.rooms[0].cx, y: this.layout.rooms[0].cy },
@@ -36,17 +40,38 @@ export class WorldBuilder {
     };
   }
 
+  /**
+   * Integrate an expansion wing: draw new floors, refresh void + all walls
+   * (an existing room gains a door), rebuild static bodies in place so live
+   * colliders keep working. Synchronous; call only when nothing is mid-flight
+   * through the changed walls (e.g. right after a full clear).
+   */
+  addExpansion(newRooms, newCorridors, wingSalt) {
+    this.buildFloors(newRooms, newCorridors.flatMap((c) => c.rects), wingSalt);
+    this.buildVoid(this.layout.bounds);
+    this.buildWalls();
+    // Destroy old static rects, then recreate from the current solids list.
+    // The bodies ARRAY object is mutated in place (length=0 + push) so the
+    // colliders registered on it keep colliding without re-registration.
+    for (const b of this.bodies) b.destroy();
+    this.bodies.length = 0;
+    this.buildBodies();
+    this.buildDecor(newRooms, wingSalt);
+  }
+
   buildVoid(bounds) {
-    this.scene.add
+    if (this.voidRect) this.voidRect.destroy();
+    this.voidRect = this.scene.add
       .rectangle(bounds.x + bounds.w / 2, bounds.y + bounds.h / 2, bounds.w, bounds.h, this.pal.void)
       .setDepth(-12);
   }
 
-  buildFloors() {
+  buildFloors(rooms, corrRects, salt) {
     const g = this.scene.add.graphics().setDepth(-10);
-    const rng = mulberry32(this.layout.seed ^ 0x51f3);
+    this.floorGfx.push(g);
+    const rng = mulberry32((this.layout.seed ^ salt) >>> 0);
     // Room floors: two alternating muted dark-red tones for variety.
-    for (const r of this.layout.rooms) {
+    for (const r of rooms) {
       const tone = r.id % 2 === 0 ? this.pal.floorA : this.pal.floorB;
       g.fillStyle(tone, 1);
       g.fillRect(r.x, r.y, r.w, r.h);
@@ -79,16 +104,16 @@ export class WorldBuilder {
       }
     }
     // Tunnel floors: slightly different tone + dim center line.
-    for (const c of this.layout.corridors) {
-      for (const t of c.rects) {
-        g.fillStyle(this.pal.tunnel, 1);
-        g.fillRect(t.x, t.y, t.w, t.h);
-      }
+    for (const t of corrRects) {
+      g.fillStyle(this.pal.tunnel, 1);
+      g.fillRect(t.x, t.y, t.w, t.h);
     }
   }
 
   buildWalls() {
+    if (this.wallGfx) this.wallGfx.destroy();
     const g = this.scene.add.graphics().setDepth(-8);
+    this.wallGfx = g;
     // Every solid shares the same dense tissue-wall look: room perimeters,
     // tunnel sides and interior blocks are visually identical.
     const obstacles = new Set(this.layout.rooms.flatMap((r) => r.obstacles));
@@ -119,10 +144,10 @@ export class WorldBuilder {
     }
   }
 
-  buildDecor() {
-    // A few barely-visible pulsating tissue nodes on room floors (bounded, cheap).
-    const rng = mulberry32(this.layout.seed ^ 0xa53c);
-    const rooms = this.layout.rooms;
+  buildDecor(rooms, salt) {
+    // Barely-visible pulsating tissue nodes on room floors (bounded, cheap).
+    if (this.pulsers.length >= 24) return;
+    const rng = mulberry32(((this.layout.seed ^ salt) >>> 0) || 1);
     const n = Math.min(12, rooms.length);
     for (let i = 0; i < n; i++) {
       const r = rooms[Math.floor(rng() * rooms.length)];
@@ -182,8 +207,14 @@ export class WorldBuilder {
 
   destroy() {
     for (const b of this.bodies) b.destroy();
-    this.bodies = [];
+    this.bodies.length = 0;
     for (const p of this.pulsers) this.scene.tweens.killTweensOf(p);
     this.pulsers = [];
+    for (const g of this.floorGfx) g.destroy();
+    this.floorGfx = [];
+    if (this.wallGfx) this.wallGfx.destroy();
+    this.wallGfx = null;
+    if (this.voidRect) this.voidRect.destroy();
+    this.voidRect = null;
   }
 }

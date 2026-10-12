@@ -1,16 +1,22 @@
 import Phaser from 'phaser';
 import {
   COLORS, DUNGEON, PLAYER, HERO_BASE, ENEMIES, ENEMY_LEVEL, SPAWNS, RESOURCE, WEAPON,
-  ALLIES, ALLY_TYPES, MUTATIONS, pickEnemyType, resolveSeed
+  ALLIES, ALLY_TYPES, MUTATIONS, PLASMA, SHOP, ARTIFACTS, ARTIFACT_CATALOG, UPGRADES,
+  GROWTHS, pickEnemyType, resolveSeed
 } from '../config.js';
-import { generateLayout } from '../world/generator.js';
+import { generateLayout, generateWing, roomDegrees } from '../world/generator.js';
 import { WorldBuilder } from '../world/WorldBuilder.js';
 import { NavGrid } from '../world/navgrid.js';
 import { RunState } from '../game/run.js';
 import { describeCard } from '../game/cards.js';
+import { rollGrowthLoot, rollCount } from '../game/loot.js';
+import {
+  ARTIFACT_BY_ID, artifactLevel, artifactMaxed, canBuyArtifact, priceOf, generateShopStock
+} from '../game/artifacts.js';
 import { ui } from '../ui.js';
 import { Minimap } from '../ui/minimap.js';
 import * as panels from '../ui/progression.js';
+import { mulberry32 } from '../world/rng.js';
 
 /**
  * Main gameplay scene (procedural tissue dungeon).
@@ -33,6 +39,12 @@ const TEX = {
   shell: 'shell',
   bullet: 'bullet',
   mote: 'mote',
+  plasma: 'plasma',
+  growth: 'growth',
+  stand: 'stand',
+  coin: 'coin',
+  relic: 'relic',
+  tonic: 'tonic',
   'enemy-a': 'enemy-a',
   'enemy-b': 'enemy-b',
   'enemy-c': 'enemy-c',
@@ -41,9 +53,15 @@ const TEX = {
   'cell-parasite': 'cell-parasite'
 };
 
-const TEX_SIZE = { dot: 8, player: 40, shell: 56, bullet: 16, mote: 20, 'enemy-a': 32, 'enemy-b': 36, 'enemy-c': 48, 'cell-hunter': 28, 'cell-defender': 36, 'cell-parasite': 24 };
+const TEX_SIZE = { dot: 8, player: 40, shell: 56, bullet: 16, mote: 20, plasma: 24, growth: 48, stand: 64, coin: 20, relic: 28, tonic: 24, 'enemy-a': 32, 'enemy-b': 36, 'enemy-c': 48, 'cell-hunter': 28, 'cell-defender': 36, 'cell-parasite': 24 };
 
 const MERGE_BADGE = ['I', 'II', 'III', 'IV', 'V'];
+
+// Константы из конфига (читаемость в сцене).
+const SHOP_CLEAR = !!SHOP.clearOnEnter; // лавка без монстров сразу «зачищена»
+const ARTIFACT_SLOTS = ARTIFACTS.slots; // активных слотов артефактов
+/** Читаемые названия улучшений (id → имя из UPGRADES). */
+const UPGRADE_NAME = Object.fromEntries(Object.entries(UPGRADES).map(([k, v]) => [k, v.name]));
 
 /**
  * Phaser 4 removed `setTintFill`. Solid hit-flash = tint + FILL mode.
@@ -119,6 +137,86 @@ function ensureTextures(scene) {
     g.fillCircle(c, c, 5);
     g.fillStyle(0xffffff, 1);
     g.fillCircle(c, c, 2);
+  });
+
+  // Plasma drop: magenta-violet droplet with a bright core (≠ green biomass).
+  makeCircleTexture(scene, TEX.plasma, TEX_SIZE.plasma, (g, s) => {
+    const c = s / 2;
+    g.fillStyle(PLASMA.color, 0.22);
+    g.fillCircle(c, c, 11);
+    g.fillStyle(PLASMA.color, 1);
+    g.fillCircle(c, c, PLASMA.radius);
+    g.fillStyle(PLASMA.glowColor, 1);
+    g.fillCircle(c, c, 3);
+  });
+
+  // Growth: fleshy mauve blob with nodules — lootable, distinct from foes.
+  if (!scene.textures.exists(TEX.growth)) {
+    const s = TEX_SIZE.growth;
+    const g = scene.add.graphics();
+    const c = s / 2;
+    const R = s / 2 - 2;
+    g.fillStyle(0x8a4a5e, 1);
+    g.fillCircle(c, c, R);
+    g.fillStyle(0x6e2f44, 1);
+    g.fillCircle(c - 7, c + 6, 7);
+    g.fillCircle(c + 8, c + 3, 6);
+    g.fillCircle(c + 1, c - 9, 5);
+    g.fillStyle(0xc07a90, 1);
+    g.fillCircle(c - 4, c - 3, 3.5);
+    g.fillCircle(c + 6, c - 6, 2.5);
+    g.lineStyle(2, 0x4a1d2b, 0.9);
+    g.strokeCircle(c, c, R);
+    g.generateTexture(TEX.growth, s, s);
+    g.destroy();
+  }
+
+  // Shop stand: каменный нарост-постамент — физическая лавка (как в рогаликах).
+  if (!scene.textures.exists(TEX.stand)) {
+    const s = TEX_SIZE.stand;
+    const g = scene.add.graphics();
+    const c = s / 2;
+    g.fillStyle(0x3a2530, 1);
+    g.fillEllipse(c, c + 10, 52, 22);
+    g.fillStyle(0x5a3648, 1);
+    g.fillEllipse(c, c + 8, 46, 18);
+    g.fillStyle(0x6e4458, 1);
+    g.fillEllipse(c, c + 4, 34, 16);
+    g.fillStyle(0x9a6a80, 1);
+    g.fillEllipse(c, c + 1, 22, 10);
+    g.lineStyle(2, 0xffd94d, 0.5);
+    g.strokeEllipse(c, c + 8, 46, 18);
+    g.generateTexture(TEX.stand, s, s);
+    g.destroy();
+  }
+
+  // Shop icons: товар, лежащий на стенде (цвет = тип товара).
+  makeCircleTexture(scene, TEX.coin, TEX_SIZE.coin, (g, s) => {
+    const c = s / 2;
+    g.fillStyle(0xffd94d, 0.25);
+    g.fillCircle(c, c, 9);
+    g.fillStyle(0xffd94d, 1);
+    g.fillCircle(c, c, 6);
+    g.fillStyle(0x7a5a10, 1);
+    g.fillCircle(c, c, 2.5);
+  });
+  makeCircleTexture(scene, TEX.relic, TEX_SIZE.relic, (g, s) => {
+    const c = s / 2;
+    g.fillStyle(0xff7ada, 0.25);
+    g.fillCircle(c, c, 13);
+    g.fillStyle(0xff7ada, 1);
+    g.fillTriangle(c, c - 10, c + 9, c + 7, c - 9, c + 7);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(c, c - 1, 3);
+  });
+  makeCircleTexture(scene, TEX.tonic, TEX_SIZE.tonic, (g, s) => {
+    const c = s / 2;
+    g.fillStyle(0x40e0d0, 0.25);
+    g.fillCircle(c, c, 11);
+    g.fillStyle(0x40e0d0, 1);
+    g.fillRoundedRect(c - 5, c - 8, 10, 16, 3);
+    g.fillStyle(0xffffff, 1);
+    g.fillRect(c - 5, c - 2, 10, 3);
   });
 
   // Enemy A: triangle (fast, fragile).
@@ -242,11 +340,16 @@ export class GameScene extends Phaser.Scene {
     this.lastHudHp = -1;
     this.lastHudKills = -1;
     this.lastHudMotes = -1;
+    this.lastHudPlasma = -1;
+    this.lastHudArtifacts = -1;
     this.lastHudLevel = -1;
     this.lastHudXp = -1;
     this.shellAngle = 0;
     this.markers = []; // pending spawn telegraphs {view, timer}
     this.retryAcc = 0;
+    this.expandAcc = 0;
+    this.wingCount = 0;
+    this.expandRetryAt = 0;
     this.currentRoom = null;
   }
 
@@ -279,6 +382,7 @@ export class GameScene extends Phaser.Scene {
       spawnMax: DUNGEON.spawnMax
     });
     this.worldApi = new WorldBuilder(this, this.layout, COLORS).build();
+    this.builder = this.worldApi.builder;
     const nav0 = performance.now();
     this.nav = new NavGrid(this.layout);
     const navMs = (performance.now() - nav0).toFixed(1);
@@ -293,7 +397,7 @@ export class GameScene extends Phaser.Scene {
     ui.reset();
     ui.setSeed(this.seed);
     ui.setLevel(this.run.level, this.run.xp, this.run.requiredXp());
-    ui.setColonyCount(0, ALLIES.max);
+    ui.setColonyCount(0, this.run.maxCells);
     panels.hideAll();
     this.minimap = new Minimap();
     this.minimap.renderBase(this.layout);
@@ -308,7 +412,13 @@ export class GameScene extends Phaser.Scene {
     this.enemies = this.physics.add.group();
     this.bullets = this.physics.add.group({ maxSize: WEAPON.bulletPoolMax });
     this.resources = this.physics.add.group();
+    this.plasma = this.physics.add.group(); // вторая валюта
+    this.growths = this.physics.add.group(); // разрушаемые наросты (не блокируют)
+    this.stands = this.physics.add.staticGroup(); // стенды лавки (блокируют, покупаем на E)
+    this.standViews = []; // { base, item, label, roomId, kind, key, price, sold }
+    this.standPrompt = null;
     this.allies = this.physics.add.group();
+    this.spawnGrowths(this.layout.rooms[0]); // наросты стартовой комнаты — после создания групп
 
     // --- Player (center of the safe start room) ---
     const { x: cx, y: cy } = this.worldApi.start;
@@ -372,8 +482,12 @@ export class GameScene extends Phaser.Scene {
     // --- Input (created once per scene run; auto-cleaned on shutdown) ---
     this.cursors = this.input.keyboard ? this.input.keyboard.createCursorKeys() : null;
     this.wasd = this.input.keyboard
-      ? this.input.keyboard.addKeys('W,A,S,D')
+      ? this.input.keyboard.addKeys('W,A,S,D,E')
       : null;
+    this.interactKey = this.input.keyboard
+      ? this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E)
+      : null;
+    this._interactWasDown = false;
 
     // --- Collisions (registered once, never per-frame) ---
     // NOTE: hero/enemy and enemy/cell damage is timer-based at attack range
@@ -381,10 +495,15 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.worldApi.bodies);
     this.physics.add.collider(this.enemies, this.worldApi.bodies);
     this.physics.add.collider(this.enemies, this.enemies); // de-stack chasers
+    this.physics.add.collider(this.player, this.stands); // стенды — твёрдые
+    this.physics.add.collider(this.enemies, this.stands);
+    this.physics.add.collider(this.allies, this.stands);
     this.physics.add.collider(this.allies, this.worldApi.bodies);
     this.physics.add.collider(this.allies, this.allies); // de-stack colony
     this.physics.add.collider(this.bullets, this.worldApi.bodies, this.onBulletWall, null, this);
     this.physics.add.overlap(this.bullets, this.enemies, this.onBulletHit, null, this);
+    // Наросты ловят снаряды overlap'ом (без collider — не блокируют движение).
+    this.physics.add.overlap(this.bullets, this.growths, this.onBulletGrowth, null, this);
     this.fireAcc = this.heroStats().intervalMs; // first shot ready immediately
   }
 
@@ -412,10 +531,11 @@ export class GameScene extends Phaser.Scene {
     this.applyRegen(dt);
     this.updateShell(dt);
     this.updateAllyViews();
+    this.updateShopStands();
     this.minimapAcc += dt;
     if (this.minimapAcc >= 300) {
       this.minimapAcc = 0;
-      this.minimap.update(this.player.x, this.player.y, this.layout.rooms, this.currentRoom ? this.currentRoom.id : null);
+      this.minimap.update(this.player.x, this.player.y, this.layout, this.currentRoom ? this.currentRoom.id : null);
     }
     this.pushHud();
   }
@@ -498,6 +618,10 @@ export class GameScene extends Phaser.Scene {
       if (this.wasd.D && this.wasd.D.isDown) dx += 1;
       if (this.wasd.W && this.wasd.W.isDown) dy -= 1;
       if (this.wasd.S && this.wasd.S.isDown) dy += 1;
+      // E — купить со стенда (по нажатию, не по удержанию).
+      const eDown = !!((this.wasd.E && this.wasd.E.isDown) || (this.interactKey && this.interactKey.isDown));
+      if (eDown && !this._interactWasDown) this.tryBuyNearStand();
+      this._interactWasDown = eDown;
     }
     if (dx !== 0 || dy !== 0) {
       const len = Math.hypot(dx, dy);
@@ -533,18 +657,327 @@ export class GameScene extends Phaser.Scene {
         if (r.activated && !r.cleared && r.queue && r.queue.length) this.tryQueue(r);
       }
     }
+    this.checkExpansion(dt);
   }
 
   activateRoom(room) {
     room.activated = true;
     room.spawnedTotal = 0;
     room.markersPending = 0;
+    // Лавка: монстров нет, считается зачищенной сразу, товар — физические стенды.
+    if (room.type === 'shop') {
+      room.cleared = SHOP_CLEAR;
+      room.queue = [];
+      if (!room.stock || !room.stock.length) {
+        // Товар детерминирован для комнаты (seed + id) — сиды воспроизводимы.
+        const rng = mulberry32(((this.seed ^ Math.imul(room.id + 1, 0x9e3779b9)) >>> 0) || 7);
+        room.stock = generateShopStock(this.run, rng);
+        room.stockBought = room.stockBought || [];
+        room.visitsHere = (room.visitsHere || 0) + 1;
+        this.run.noteShopVisit();
+      }
+      this.spawnShopStands(room); // идемпотентно: второй вход не дублирует
+      ui.toast('Лавка: подойди к стенду и нажми E, чтобы купить');
+      return;
+    }
+    this.spawnGrowths(room); // наросты появляются вместе с активацией комнаты
     room.cleared = false;
     room.queue = room.spawns.map((p) => ({ ...p }));
     // Level scaling: extra spawn markers on top of the base points.
     const extra = (this.run.level - 1) * ENEMY_LEVEL.extraSpawnsPerLevel;
     for (const p of this.sampleExtraSpawns(room, extra)) room.queue.push(p);
     this.tryQueue(room);
+  }
+
+  /** Открыть окно лавки (с генерацией товара под текущий прогресс). */
+  openShop(room) {
+    // Физическая лавка: модалка при входе больше не открывается.
+    // Стенды заспавнены в activateRoom — покупка через E рядом со стендом.
+    if (!room.stock || !room.stock.length) return;
+    this.spawnShopStands(room);
+  }
+
+  /**
+   * Физические стенды-наросты лавки: постамент + товар + ценник.
+   * Идемпотентно: повторная активация комнаты стенды не дублирует.
+   */
+  spawnShopStands(room) {
+    if (room.standsSpawned) return;
+    if (!room.stock || !room.stock.length) return;
+    room.standsSpawned = true;
+    const n = room.stock.length;
+    const cols = Math.ceil(Math.sqrt(n));
+    const sx = SHOP.standSpacingX;
+    const sy = SHOP.standSpacingY;
+    const mouths = this.doorMouths(room);
+    const spots = [];
+    const rows = Math.ceil(n / cols);
+    for (let row = 0; row < rows + 2 && spots.length < n; row++) {
+      const countInRow = Math.min(cols, n - spots.length);
+      const y = room.cy + (row - (rows - 1) / 2) * sy;
+      for (let i = 0; i < countInRow && spots.length < n; i++) {
+        const x = room.cx + (i - (countInRow - 1) / 2) * sx;
+        const px = Math.max(room.x + 70, Math.min(room.x + room.w - 70, x));
+        const py = Math.max(room.y + 90, Math.min(room.y + room.h - 70, y));
+        if (mouths.some((m) => Math.hypot(m.x - px, m.y - py) < SHOP.doorClearance)) continue;
+        if (!this.worldApi.isWalkable(px, py, SHOP.standRadius)) continue;
+        if (spots.some((p) => Math.hypot(p.x - px, p.y - py) < sx * 0.7)) continue;
+        spots.push({ x: px, y: py });
+      }
+    }
+    let fx = room.cx - n * 40;
+    for (let i = spots.length; i < n; i++) {
+      const p = this.worldApi.nearestWalkable(
+        Math.max(room.x + 70, Math.min(room.x + room.w - 70, fx)),
+        room.cy, SHOP.standRadius + 6);
+      fx += 80;
+      if (p) spots.push(p);
+    }
+    room.stock.forEach((offer, i) => {
+      const spot = spots[i % Math.max(1, spots.length)] || { x: room.cx, y: room.cy };
+      this.makeShopStand(room, offer, spot, i);
+    });
+  }
+
+  /** Один стенд: твёрдая база, иконка товара, ценник. Купленное — тусклое. */
+  makeShopStand(room, offer, spot, idx) {
+    const key = offer.kind + ':' + offer.key;
+    const sold = (room.stockBought || []).includes(key);
+    const base = this.stands.create(spot.x, spot.y, TEX.stand);
+    if (!base) return;
+    base.setDepth(4);
+    base.setData('roomId', room.id);
+    base.setData('standKey', key);
+    base.setInteractive({ useHandCursor: true });
+    base.on('pointerdown', () => {
+      if (this.modalOpen || this.isGameOver || !this.player) return;
+      const d = Math.hypot(base.x - this.player.x, base.y - this.player.y);
+      if (d > SHOP.interactRadius) {
+        ui.toast('Подойди ближе к стенду');
+        return;
+      }
+      this.tryBuyNearStand();
+    });
+    base.body.setCircle(
+      SHOP.standRadius * 0.85,
+      TEX_SIZE.stand / 2 - SHOP.standRadius * 0.85,
+      TEX_SIZE.stand / 2 - SHOP.standRadius * 0.85);
+    base.body.updateFromGameObject(); // static body: неподвижно по определению
+    const iconTex = offer.kind === 'artifact' ? TEX.relic : TEX.tonic;
+    const item = this.add.image(spot.x, spot.y - 26, iconTex).setDepth(5);
+    if (sold) item.setAlpha(0.25);
+    else {
+      this.tweens.add({
+        targets: item, y: spot.y - 32, duration: 900 + idx * 120,
+        yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+      });
+    }
+    const label = this.add.text(spot.x, spot.y + 30, '', {
+      fontFamily: 'monospace', fontSize: SHOP.labelFont, color: '#ffd94d',
+      backgroundColor: 'rgba(5,7,10,0.75)', padding: { x: 5, y: 2 }, align: 'center',
+      wordWrap: { width: 200, useAdvancedWrap: true }
+    }).setOrigin(0.5, 0).setDepth(6);
+    const view = { base, item, label, roomId: room.id, kind: offer.kind, key: offer.key, sold };
+    this.refreshStandLabel(room, view);
+    this.standViews.push(view);
+  }
+
+  /** Ценник стенда: имя + цена + описание. После покупки — «продано». */
+  refreshStandLabel(room, view) {
+    const price = this.shopPrice(room, { kind: view.kind, key: view.key });
+    view.price = price;
+    const offer = { kind: view.kind, key: view.key };
+    const name = this.offerName(offer);
+    const detail = this.offerDetail(offer);
+    if (view.sold) view.label.setText(`${name}\nпродано`);
+    else view.label.setText(`${name}\n${detail}\n${price} плазмы [E]`);
+    const afford = this.run.plasma >= price;
+    view.label.setColor(view.sold ? '#6f8f8b' : (afford ? '#ffd94d' : '#ff7a7a'));
+  }
+
+  /** Ближайший некупленный стенд в радиусе взаимодействия. */
+  nearestStand() {
+    if (!this.player || this.isGameOver) return null;
+    let best = null;
+    let bestD2 = SHOP.interactRadius * SHOP.interactRadius;
+    for (const v of this.standViews) {
+      if (!v || v.sold || !v.base || !v.base.active) continue;
+      const dx = v.base.x - this.player.x;
+      const dy = v.base.y - this.player.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) { bestD2 = d2; best = v; }
+    }
+    return best;
+  }
+
+  /** Покупка по E: ближайший стенд рядом с игроком. */
+  tryBuyNearStand() {
+    if (this.modalOpen || this.isGameOver || !this.player) return;
+    const view = this.nearestStand();
+    if (!view) return;
+    const room = this.layout.rooms.find((r) => r.id === view.roomId);
+    if (!room) return;
+    const ok = this.buyOffer(room, { kind: view.kind, key: view.key });
+    if (ok) {
+      view.sold = true;
+      view.item.setAlpha(0.25);
+      this.tweens.killTweensOf(view.item);
+      this.refreshStandLabel(room, view);
+      this.hitSparks.explode(8, view.base.x, view.base.y - 20);
+    } else {
+      this.tweens.add({ targets: view.label, x: '+=6', duration: 50, yoyo: true, repeat: 3 });
+      this.refreshStandLabel(room, view);
+    }
+  }
+
+  /** Подсказка «E — купить» над ближайшим стендом + обновление ценников. */
+  updateShopStands() {
+    const near = (!this.modalOpen && !this.isGameOver) ? this.nearestStand() : null;
+    // Ценники зависят от плазмы — обновляем только при её изменении.
+    if (this.run.plasma !== this._standPlasma) {
+      this._standPlasma = this.run.plasma;
+      for (const v of this.standViews) {
+        if (!v.base || !v.base.active || v.sold) continue;
+        const rm = this.layout.rooms.find((r) => r.id === v.roomId);
+        if (rm) this.refreshStandLabel(rm, v);
+      }
+    }
+    if (!near) {
+      if (this.standPrompt) { this.standPrompt.destroy(); this.standPrompt = null; }
+      return;
+    }
+    const offer = { kind: near.kind, key: near.key };
+    const txt = `${this.offerName(offer)}\n${this.offerDetail(offer)}\n${near.price} · [E] купить`;
+    if (!this.standPrompt) {
+      this.standPrompt = this.add.text(near.base.x, near.base.y - 62, txt, {
+        fontFamily: 'monospace', fontSize: '13px', color: '#ffe86b',
+        backgroundColor: 'rgba(5,7,10,0.85)', padding: { x: 6, y: 3 }, align: 'center',
+        wordWrap: { width: 240, useAdvancedWrap: true }
+      }).setOrigin(0.5, 1).setDepth(8);
+    } else {
+      this.standPrompt.setText(txt);
+      this.standPrompt.setPosition(near.base.x, near.base.y - 62);
+    }
+  }
+
+  offerName(o) {
+    if (o.kind === 'upgrade') {
+      const def = UPGRADE_NAME[o.key];
+      return def || o.key;
+    }
+    const def = ARTIFACT_BY_ID[o.key];
+    return def ? def.name : o.key;
+  }
+
+  offerDetail(o) {
+    if (o.kind === 'upgrade') {
+      const lvl = this.run.upgradeLevel(o.key);
+      return lvl ? `Улучшение · ур. ${lvl} → ${lvl + 1}` : 'Улучшение · новый эффект';
+    }
+    const def = ARTIFACT_BY_ID[o.key];
+    const lvl = artifactLevel(this.run, o.key);
+    if (!def) return 'Артефакт';
+    return lvl ? `Артефакт · ур. ${lvl} → ${lvl + 1}: ${def.desc}` : `Артефакт: ${def.desc}`;
+  }
+
+  /** Цена товара с учётом посещений лавок (наценка). */
+  shopPrice(room, offer) {
+    const level = offer.kind === 'upgrade'
+      ? this.run.upgradeLevel(offer.key)
+      : artifactLevel(this.run, offer.key);
+    // Наценка считается от посещений до входа в эту лавку.
+    const visits = Math.max(0, this.run.shopVisits - 1);
+    const visitsHere = room.visitsHere || 0;
+    const price = priceOf(offer.kind, offer.key, level, visits + visitsHere);
+    return price;
+  }
+
+  buyOffer(room, offer) {
+    room.stockBought = room.stockBought || [];
+    const key = offer.kind + ':' + offer.key;
+    if (room.stockBought.includes(key)) return false;
+    const price = this.shopPrice(room, offer);
+    if (this.run.plasma < price) {
+      ui.toast('Недостаточно плазмы');
+      return false;
+    }
+    if (offer.kind === 'upgrade') {
+      if (!this.run.upgradeAvailable(offer.key)) return false;
+      this.run.applyUpgrade(offer.key);
+      this.dirtyHero();
+    } else {
+      const def = ARTIFACT_BY_ID[offer.key];
+      if (!def || !canBuyArtifact(this.run, offer.key)) return false;
+      const res = this.run.buyArtifact(offer.key, def);
+      room.stockBought.push(key);
+      if (def.effect.health) this.hp += def.effect.health; // панцирь лечит
+      this.dirtyHero();
+      ui.toast(res.activated ? `Артефакт «${def.name}» активен` : `Артефакт «${def.name}» усилен (слоты заняты)`);
+      this.run.spendPlasma(price);
+      this.pushHud();
+      return true;
+    }
+    room.stockBought.push(key);
+    this.run.spendPlasma(price);
+    this.pushHud();
+    return true;
+  }
+
+  closeShop() {
+    // Физическая лавка модалки не открывает — заглушка для совместимости.
+    panels.hideShop();
+    this.pushHud();
+  }
+
+  // ----------------------------------------------------- artifact inventory
+
+  openArtifacts() {
+    if (this.modalOpen || this.isGameOver) return;
+    this.modalOpen = true;
+    this.renderArtifacts();
+    setTimeout(() => {
+      if (!this.isGameOver && this.modalOpen) this.scene.pause();
+    }, 0);
+  }
+
+  renderArtifacts() {
+    panels.showArtifacts(
+      {
+        slots: ARTIFACT_SLOTS,
+        used: this.run.activeArtifacts.length,
+        plasma: this.run.plasma,
+        items: ARTIFACT_CATALOG.map((a) => ({
+          id: a.id,
+          name: a.name,
+          desc: a.desc,
+          level: artifactLevel(this.run, a.id),
+          maxLevel: a.maxLevel,
+          active: this.run.activeArtifacts.includes(a.id)
+        }))
+      },
+      {
+        onToggle: (id, on) => this.toggleArtifact(id, on),
+        onClose: () => this.closeArtifacts()
+      }
+    );
+  }
+
+  toggleArtifact(id, on) {
+    const r = this.run.setArtifactActive(id, on);
+    if (!r.ok && r.reason) ui.toast(r.reason);
+    this.dirtyHero();
+    // Панцирь при активации/снятии меняет максимум HP — подтягиваем текущее.
+    const st = this.heroStats();
+    this.hp = Math.min(this.hp, st.maxHealth);
+    this.renderArtifacts();
+    this.pushHud();
+  }
+
+  closeArtifacts() {
+    panels.hideArtifacts();
+    this.modalOpen = false;
+    if (!this.isGameOver) this.scene.resume();
+    this.pushHud();
   }
 
   /** Extra perimeter spawn points for higher levels (bounded attempts). */
@@ -653,9 +1086,90 @@ export class GameScene extends Phaser.Scene {
   checkRoomCleared(room) {
     if (!room || room.isStart || room.cleared || !room.activated) return;
     if ((room.markersPending || 0) > 0 || (room.queue && room.queue.length)) return;
-    if (!room.spawnedTotal) return;
+    if (!room.spawnedTotal) {
+      room.cleared = true; // activated but nothing ever queued: vacuously done
+      return;
+    }
     const alive = this.enemies.getChildren().some((e) => e.active && e.getData('roomId') === room.id);
     if (!alive) room.cleared = true; // stays cleared for the rest of the run
+  }
+
+  // ------------------------------------------------------ map expansion
+
+  /** Every room walked and every fight finished (start needs visit only). */
+  allRoomsDone() {
+    for (const r of this.layout.rooms) {
+      if (!r.visited) return false;
+      if (!r.isStart && !r.cleared) return false;
+    }
+    return true;
+  }
+
+  /** Nearest dead-end (leaf) room to the player; lowest degree breaks ties. */
+  pickGateway() {
+    const deg = roomDegrees(this.layout);
+    let best = null;
+    let bestScore = null;
+    for (const r of this.layout.rooms) {
+      const d = deg.get(r.id) ?? 99;
+      const dist = Math.hypot(r.cx - this.player.x, r.cy - this.player.y);
+      // Leaves first (degree 1), then nearest — score sorts degree, then dist.
+      const score = d * 1e9 + dist;
+      if (bestScore === null || score < bestScore) {
+        bestScore = score;
+        best = r;
+      }
+    }
+    return best;
+  }
+
+  checkExpansion(dt) {
+    this.expandAcc += dt;
+    if (this.expandAcc < 2000) return; // slow tick, not per-frame work
+    this.expandAcc = 0;
+    if (this.isGameOver || this.modalOpen || this.wingCount >= 99) return;
+    if (this.time.now < this.expandRetryAt) return;
+    if (!this.allRoomsDone()) return;
+    this.doExpansion();
+  }
+
+  doExpansion() {
+    const gateway = this.pickGateway();
+    if (!gateway) return;
+    const wingIndex = this.wingCount + 1;
+    const t0 = performance.now();
+    const res = generateWing(this.seed, wingIndex, this.layout, gateway.id);
+    if (!res) {
+      // No free space found from here — try again later (player may move on).
+      this.expandRetryAt = this.time.now + 15000;
+      return;
+    }
+    this.wingCount = wingIndex;
+    // New floors first (under old walls), then full wall/body refresh so the
+    // gateway's fresh door actually opens. Bodies array mutates in place —
+    // live colliders keep working without re-registration.
+    const newRooms = res.roomIds.map((id) => this.layout.rooms[id]);
+    const newCorridors = this.layout.corridors.slice(-res.corridorCount);
+    this.builder.addExpansion(newRooms, newCorridors, 0x1000 * wingIndex + 0x77);
+    // World + camera bounds grow; bullets use playBounds live.
+    const b = this.layout.bounds;
+    this.playBounds = b;
+    this.physics.world.setBounds(b.x, b.y, b.w, b.h);
+    this.cameras.main.setBounds(b.x, b.y, b.w, b.h);
+    // Fresh nav grid (ms-scale) + drop stale agent paths.
+    this.nav = new NavGrid(this.layout);
+    window.__world.nav = this.nav;
+    for (const e of this.enemies.getChildren()) {
+      if (e.active) e.setData('path', null);
+    }
+    for (const cell of this.run.cells) cell.path = null;
+    this.minimap.renderBase(this.layout);
+    console.log(
+      `[viscera] wing ${wingIndex}: +${res.roomIds.length} rooms via dead-end ${gateway.id} ` +
+      `in ${(performance.now() - t0).toFixed(0)}ms (total ${this.layout.rooms.length})`
+    );
+    ui.toast(`New tissue grown — ${res.roomIds.length} chambers (wing ${wingIndex})`);
+    this.pushHud();
   }
 
   // ---------------------------------------------------------------- combat
@@ -664,7 +1178,8 @@ export class GameScene extends Phaser.Scene {
     const hs = this.heroStats();
     this.fireAcc += dt;
     if (this.fireAcc < hs.intervalMs) return;
-    const target = this.findNearestEnemy(WEAPON.range);
+    // Нет врагов рядом — герой разбивает ближайший нарост в радиусе.
+    const target = this.findNearestEnemy(hs.attackRange) ?? this.findNearestGrowth(hs.attackRange);
     if (!target) {
       this.fireAcc = hs.intervalMs; // hold ready until a target enters range
       return;
@@ -689,6 +1204,153 @@ export class GameScene extends Phaser.Scene {
       }
     }
     return best;
+  }
+
+  /** Ближайший целый нарост в радиусе (для добивания, когда врагов нет). */
+  findNearestGrowth(range) {
+    let best = null;
+    let bestD2 = range * range;
+    const px = this.player.x;
+    const py = this.player.y;
+    for (const g of this.growths.getChildren()) {
+      if (!g.active) continue;
+      const dx = g.x - px;
+      const dy = g.y - py;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = g;
+      }
+    }
+    return best;
+  }
+
+  // ------------------------------------------------------------ growths
+
+  /** Устья дверей комнаты (точки внутри, для отступа наростов от проходов). */
+  doorMouths(room) {
+    return (room.doors || []).map((d) => {
+      if (d.side === 'N') return { x: Math.max(room.x + 20, Math.min(room.x + room.w - 20, d.at)), y: room.y + 30 };
+      if (d.side === 'S') return { x: Math.max(room.x + 20, Math.min(room.x + room.w - 20, d.at)), y: room.y + room.h - 30 };
+      if (d.side === 'W') return { x: room.x + 30, y: Math.max(room.y + 20, Math.min(room.y + room.h - 20, d.at)) };
+      return { x: room.x + room.w - 30, y: Math.max(room.y + 20, Math.min(room.y + room.h - 20, d.at)) };
+    });
+  }
+
+  /**
+   * Наросты комнаты: сид зависит только от seed карты и id комнаты,
+   * поэтому перезапуск даёт те же наросты независимо от порядка обхода.
+   */
+  spawnGrowths(room) {
+    if (room.growthsSpawned) return;
+    room.growthsSpawned = true;
+    const rng = mulberry32(((this.seed ^ Math.imul(room.id + 1, 0x51ed270b)) >>> 0) || 13);
+    const n = room.isStart
+      ? (rng() < 0.7 ? 1 : 0)
+      : GROWTHS.minPerRoom + Math.floor(rng() * (GROWTHS.maxPerRoom - GROWTHS.minPerRoom + 1));
+    const mouths = this.doorMouths(room);
+    const placed = [];
+    for (let i = 0; i < n * 30 && placed.length < n; i++) {
+      const x = room.x + GROWTHS.inset + rng() * (room.w - GROWTHS.inset * 2);
+      const y = room.y + GROWTHS.inset + rng() * (room.h - GROWTHS.inset * 2);
+      const radius = GROWTHS.radiusMin + rng() * (GROWTHS.radiusMax - GROWTHS.radiusMin);
+      if (!this.worldApi.isWalkable(x, y, radius)) continue; // стены и препятствия
+      if (mouths.some((m) => Math.hypot(m.x - x, m.y - y) < GROWTHS.doorClearance)) continue;
+      if (placed.some((p) => Math.hypot(p.x - x, p.y - y) < GROWTHS.minSeparation)) continue;
+      placed.push({ x, y, radius });
+    }
+    for (const p of placed) {
+      const hp = GROWTHS.hpMin + Math.floor(rng() * (GROWTHS.hpMax - GROWTHS.hpMin + 1));
+      const img = this.growths.create(p.x, p.y, TEX.growth);
+      if (!img) continue;
+      img.setDepth(4);
+      img.setScale((p.radius * 2) / TEX_SIZE.growth);
+      img.body.setAllowGravity(false);
+      img.body.setCircle(p.radius * 0.8, 24 - p.radius * 0.8, 24 - p.radius * 0.8);
+      img.body.setImmovable(true);
+      img.setVelocity(0, 0);
+      img.setData('hp', hp);
+      img.setData('maxHp', hp);
+      img.setData('radius', p.radius);
+    }
+  }
+
+  onBulletGrowth(bullet, growth) {
+    if (!bullet.active || !growth.active || this.isGameOver) return;
+    const dmg = bullet.getData('dmg') ?? this.heroStats().attack;
+    const bx = bullet.x;
+    const by = bullet.y;
+    bullet.destroy();
+    const hp = (growth.getData('hp') ?? 1) - dmg;
+    this.hitSparks.explode(4, bx, by);
+    if (hp <= 0) {
+      this.breakGrowth(growth);
+      return;
+    }
+    growth.setData('hp', hp);
+    // Нарост «трескается»: вспышка и ужатие по мере урона.
+    setFillTint(growth, 0xffffff);
+    this.time.delayedCall(60, () => {
+      if (growth.active) growth.clearTint();
+    });
+    const frac = hp / (growth.getData('maxHp') || 1);
+    const r = growth.getData('radius') || 18;
+    growth.setScale(((r * 2) / TEX_SIZE.growth) * (0.7 + 0.3 * frac));
+  }
+
+  /** Разбиение нароста: биомасса, плазма, редко — артефакт или клетка. */
+  breakGrowth(g) {
+    const x = g.x;
+    const y = g.y;
+    const G = GROWTHS;
+    this.hitSparks.explode(10, x, y);
+    this.moteSparks.explode(6, x, y);
+    g.destroy();
+    // Лут определяется одним вызовом до любых эффектов (предсказуемо и тестируемо).
+    const roll = rollGrowthLoot();
+    if (roll.biomass) {
+      this.spawnMotes(x, y,
+        rollCount(Math.random, G.dropBiomassMin, G.dropBiomassMax));
+    }
+    if (roll.plasma) {
+      this.spawnPlasmaDrops(x, y,
+        rollCount(Math.random, G.dropPlasmaMin, G.dropPlasmaMax));
+    }
+    if (roll.artifact) this.grantGrowthArtifact(x, y);
+    else if (roll.cell) this.grantGrowthCell(x, y);
+  }
+
+  grantGrowthArtifact(x, y) {
+    const pool = ARTIFACT_CATALOG.filter((a) => !artifactMaxed(this.run, a.id));
+    if (!pool.length) {
+      this.spawnPlasmaDrops(x, y, GROWTHS.fallbackPlasma);
+      ui.toast('Все артефакты улучшены — вместо этого плазма');
+      return;
+    }
+    const def = pool[Math.floor(Math.random() * pool.length)];
+    const res = this.run.buyArtifact(def.id, def);
+    this.dirtyHero();
+    if (def.effect.health) this.hp = Math.min(this.heroStats().maxHealth, this.hp + def.effect.health);
+    ui.toast(res.activated ? `Артефакт «${def.name}» из нароста — активен!` : `Артефакт «${def.name}» из нароста усилен!`);
+    this.pushHud();
+  }
+
+  grantGrowthCell(x, y) {
+    void x;
+    void y;
+    const types = Object.keys(ALLY_TYPES);
+    const type = types[Math.floor(Math.random() * types.length)];
+    if (this.run.freeCellSlots() <= 0) {
+      this.spawnPlasmaDrops(x, y, GROWTHS.fallbackPlasma);
+      ui.toast('Нет места для клетки — вместо неё плазма');
+      return;
+    }
+    const cell = this.run.addCell(type);
+    if (!cell) return;
+    this.spawnAllyView(cell);
+    ui.setColonyCount(this.run.cells.length, this.run.maxCells);
+    ui.toast(`Клетка «${ALLY_TYPES[type].name}» вылупилась из нароста!`);
+    this.pushHud();
   }
 
   fireBulletAt(target, damage) {
@@ -895,7 +1557,7 @@ export class GameScene extends Phaser.Scene {
   enemyStrike(e, tgt) {
     if (!e.active || this.isGameOver) return;
     const dmg = e.getData('damage');
-    if (tgt.kind === 'hero') this.applyHeroHit(dmg, e.x, e.y);
+    if (tgt.kind === 'hero') this.applyHeroHit(dmg, e.x, e.y, e);
     else {
       const cell = this.run.getCell(tgt.id);
       if (cell) this.damageCell(cell, dmg, e.x, e.y);
@@ -919,21 +1581,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   // --------------------------------------------------------------- resources
-
-  dropResources(typeKey, x, y) {    const type = ENEMIES.types.find((t) => t.key === typeKey) || ENEMIES.types[0];
+  dropResources(typeKey, x, y) {
+    const type = ENEMIES.types.find((t) => t.key === typeKey) || ENEMIES.types[0];
     if (Math.random() > type.dropChance) return;
     const [nMin, nMax] = type.dropCount;
-    const n = nMin + Math.floor(Math.random() * (nMax - nMin + 1));
+    this.spawnMotes(x, y, nMin + Math.floor(Math.random() * (nMax - nMin + 1)));
+  }
+
+  /** Моты биомассы в свободных точках рядом (с лимитом группы). */
+  spawnMotes(x, y, n) {
     for (let i = 0; i < n; i++) {
       if (this.resources.countActive(true) >= RESOURCE.cap) {
         const oldest = this.resources.getFirstAlive();
         if (oldest) oldest.destroy(); // recycle, never accumulate
       }
-      const px = x + (Math.random() - 0.5) * 60;
-      const py = y + (Math.random() - 0.5) * 60;
-      const spot = this.worldApi.nearestWalkable(px, py, 14) ||
-        this.worldApi.nearestWalkable(x, y, 14);
-      if (!spot) continue; // no free floor nearby — skip rather than embed in a wall
+      const spot = this.freeSpotNear(x, y) || { x, y };
       const m = this.resources.create(spot.x, spot.y, TEX.mote);
       if (!m) continue;
       m.setDepth(3);
@@ -945,8 +1607,43 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Плазма: падает чаще биомассы и ценнее (она — валюта лавок). */
+  dropPlasma(typeKey, x, y) {
+    const chance = PLASMA.perEnemyChance[typeKey] ?? PLASMA.baseChance;
+    if (Math.random() > chance) return;
+    this.spawnPlasmaDrops(x, y,
+      PLASMA.valueMin + Math.floor(Math.random() * (PLASMA.valueMax - PLASMA.valueMin + 1)));
+  }
+
+  /** Капли плазмы в свободных точках рядом (с лимитом группы). */
+  spawnPlasmaDrops(x, y, n) {
+    for (let i = 0; i < n; i++) {
+      if (this.plasma.countActive(true) >= PLASMA.cap) {
+        const oldest = this.plasma.getFirstAlive();
+        if (oldest) oldest.destroy(); // recycle, never accumulate
+      }
+      const spot = this.freeSpotNear(x + (Math.random() - 0.5) * 40, y + (Math.random() - 0.5) * 40) ||
+        this.freeSpotNear(x, y);
+      if (!spot) continue;
+      const m = this.plasma.create(spot.x, spot.y, TEX.plasma);
+      if (!m) continue;
+      m.setDepth(3);
+      m.body.setAllowGravity(false);
+      m.body.setCircle(9, 3, 3);
+      m.body.setImmovable(true);
+      m.setVelocity(0, 0);
+      this.tweens.add({ targets: m, y: spot.y + 6, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
+  }
+
+  /** Ближайшая свободная от стен/препятствий точка (для выпадения ресурсов). */
+  freeSpotNear(x, y) {
+    return this.worldApi.nearestWalkable(x, y, 12);
+  }
+
   updatePickups() {
-    const r2 = RESOURCE.pickupRadius * RESOURCE.pickupRadius;
+    const st = this.heroStats();
+    const r2 = st.pickupRadius * st.pickupRadius;
     const px = this.player.x;
     const py = this.player.y;
     for (const m of this.resources.getChildren()) {
@@ -957,13 +1654,23 @@ export class GameScene extends Phaser.Scene {
         this.motes += 1;
         this.moteSparks.explode(6, m.x, m.y);
         m.destroy();
-        // Biomass doubles as XP: surplus past a threshold is kept.
+        // Биомасса — опыт: излишек за порогом уровня сохраняется.
         const gained = this.run.addXp(1);
         if (gained > 0) {
           this.pendingLevels += gained;
           this.pushHud();
           if (!this.modalOpen) this.openDraft();
         }
+      }
+    }
+    for (const m of this.plasma.getChildren()) {
+      if (!m.active) continue;
+      const dx = m.x - px;
+      const dy = m.y - py;
+      if (dx * dx + dy * dy < r2) {
+        this.run.addPlasma(1);
+        this.moteSparks.explode(4, m.x, m.y);
+        m.destroy();
       }
     }
   }
@@ -981,11 +1688,13 @@ export class GameScene extends Phaser.Scene {
   pushHud() {
     const hs = this.heroStats();
     const hpChanged = Math.abs(this.hp - this.lastHudHp) >= 0.5;
-    if (hpChanged || this.kills !== this.lastHudKills || this.motes !== this.lastHudMotes) {
+    const plasmaChanged = this.lastHudPlasma !== this.run.plasma;
+    if (hpChanged || this.kills !== this.lastHudKills || this.motes !== this.lastHudMotes || plasmaChanged) {
       this.lastHudHp = this.hp;
       this.lastHudKills = this.kills;
       this.lastHudMotes = this.motes;
-      ui.update(this.hp, hs.maxHealth, this.kills, this.motes);
+      this.lastHudPlasma = this.run.plasma;
+      ui.update(this.hp, hs.maxHealth, this.kills, this.motes, this.run.plasma);
     }
     if (this.run.level !== this.lastHudLevel || this.run.xp !== this.lastHudXp) {
       this.lastHudLevel = this.run.level;
@@ -993,6 +1702,10 @@ export class GameScene extends Phaser.Scene {
       ui.setLevel(this.run.level, this.run.xp, this.run.requiredXp());
     }
     ui.setColonyCount(this.run.cells.length, this.run.maxCells);
+    if (this.lastHudArtifacts !== this.run.activeArtifacts.length) {
+      this.lastHudArtifacts = this.run.activeArtifacts.length;
+      ui.setArtifacts(this.run.activeArtifacts.length, ARTIFACT_SLOTS);
+    }
   }
 
   // -------------------------------------------------- draft & colony UI
@@ -1045,8 +1758,14 @@ export class GameScene extends Phaser.Scene {
       this.spawnAllyView(result);
       ui.setColonyCount(this.run.cells.length, this.run.maxCells);
     }
-    if (card.kind === 'mutation' && target && target.scope === 'hero' && card.mutation === 'membrane') {
-      this.hp += MUTATIONS.membrane.healthBonus; // grow into the new tissue
+    if (card.kind === 'mutation') {
+      if (target && target.scope === 'hero' && card.mutation === 'membrane') {
+        this.hp += MUTATIONS.membrane.healthBonus; // grow into the new tissue
+      }
+      if (target && target.scope === 'cell' && card.mutation === 'membrane' && target.id) {
+        const cell = this.run.getCell(target.id);
+        if (cell) cell.hp += MUTATIONS.membrane.healthBonus;
+      }
     }
     this.dirtyHero();
     this.pendingLevels -= 1;
@@ -1059,12 +1778,12 @@ export class GameScene extends Phaser.Scene {
         cards: this.draftCards,
         onPick: (c) => this.onPickCard(c)
       });
-    } else {
-      panels.hideDraft();
-      this.modalOpen = false;
-      if (!this.isGameOver) this.scene.resume();
-      this.pushHud();
+      return;
     }
+    panels.hideDraft();
+    this.modalOpen = false;
+    if (!this.isGameOver) this.scene.resume();
+    this.pushHud();
   }
 
   openColony() {
@@ -1148,7 +1867,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Hero melee-range hit (replaces the old overlap damage; single path). */
-  applyHeroHit(dmg, fromX, fromY) {
+  applyHeroHit(dmg, fromX, fromY, attacker = null) {
     if (this.isGameOver || !this.player || !this.player.active) return;
     const now = this.time.now;
     if (now < this.invulnUntil) return; // i-frames
@@ -1157,6 +1876,10 @@ export class GameScene extends Phaser.Scene {
     this.hp -= dmg;
     this.hitSparks.explode(8, this.player.x, this.player.y);
     this.cameras.main.shake(90, 0.003);
+
+    // Артефакт «Шипы»: урон атакующему в ответ.
+    const thorns = this.heroStats().thorns;
+    if (thorns > 0 && attacker && attacker.active) this.damageEnemy(attacker, thorns);
 
     // Knockback away from the attacker + red flash. Kept modest on purpose:
     // arcade ignores separation when overlap exceeds one step of motion,
@@ -1363,9 +2086,19 @@ export class GameScene extends Phaser.Scene {
     enemy.destroy();
     this.kills += 1;
     this.dropResources(typeKey, x, y);
+    this.dropPlasma(typeKey, x, y);
+    this.applyLeech();
     const room = typeof roomId === 'number' ? this.layout.rooms[roomId] : null;
     this.checkRoomCleared(room);
     this.pushHud();
+  }
+
+  /** Артефакт «Пиявка»: лечение за каждое убийство. */
+  applyLeech() {
+    const st = this.heroStats();
+    if (st.leech > 0 && this.hp < st.maxHealth) {
+      this.hp = Math.min(st.maxHealth, this.hp + st.leech);
+    }
   }
 
   gameOver() {

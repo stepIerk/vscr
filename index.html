@@ -26,6 +26,10 @@
           <span id="motes-text" class="hud-value mote">0</span>
         </div>
         <div class="hud-row">
+          <span class="hud-label">PLASMA</span>
+          <span id="plasma-text" class="hud-value plasma">0</span>
+        </div>
+        <div class="hud-row">
           <span class="hud-label">LEVEL</span>
           <span id="level-text" class="hud-value">1</span>
           <div class="xp-track">
@@ -33,16 +37,19 @@
           </div>
           <span id="xp-text" class="hud-value xp">0/6</span>
         </div>
-        <div class="hud-row">
+        <div class="hud-row hud-buttons">
           <button id="colony-btn" type="button" class="hud-btn">Colony (0/5)</button>
+          <button id="artifacts-btn" type="button" class="hud-btn">Artifacts (0/5)</button>
         </div>
-        <div class="hud-hint">WASD / arrows — move · auto-attack nearest</div>
+        <div class="hud-hint">WASD / arrows — move · auto-attack nearest · E — buy at stand</div>
         <div id="seed-text" class="hud-seed">seed —</div>
       </div>
 
       <div id="minimap-wrap">
         <canvas id="minimap" width="220" height="220"></canvas>
       </div>
+
+      <div id="toast" class="toast hidden"></div>
 
       <div id="gameover" class="gameover hidden">
         <div class="gameover-card">

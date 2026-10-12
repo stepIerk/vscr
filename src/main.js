@@ -42,5 +42,9 @@ ui.bindColony(() => {
   const scene = game.scene.getScene('Game');
   if (scene) scene.openColony();
 });
+ui.bindArtifacts(() => {
+  const scene = game.scene.getScene('Game');
+  if (scene) scene.openArtifacts();
+});
 
 export default game;

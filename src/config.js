@@ -32,14 +32,20 @@ export const COLORS = {
 
 /** Dungeon generation parameters (game coords, not screen pixels). */
 export const DUNGEON = {
+  // Сколько комнат генерируется на карте (минимум/максимум).
   roomCountMin: 12,
   roomCountMax: 18,
-  roomMin: 560,
-  roomMax: 1080,
+  // Размеры комнат в игровых координатах (не зависят от разрешения экрана).
+  roomMin: 760,
+  roomMax: 1500,
+  // Минимальная сторона стартовой (безопасной) комнаты.
   startRoomMin: 700,
+  // Ширина тоннелей между комнатами.
   tunnelWidth: 120,
+  // Толщина стен.
   wall: 24,
-  spawnAreaPer: 70000, // room area funding one spawn point
+  // Сколько площадей комнаты даёт одну точку появления врага.
+  spawnAreaPer: 70000,
   spawnMin: 3,
   spawnMax: 9
 };
@@ -76,7 +82,7 @@ export const ENEMIES = {
 
 /** +N extra spawn markers per room per hero level above 1. */
 export const ENEMY_LEVEL = {
-  extraSpawnsPerLevel: 1
+  extraSpawnsPerLevel: 5
 };
 
 /** Telegraphed room spawns use these; kept in sync with generator defaults. */
@@ -88,6 +94,122 @@ export const RESOURCE = {
   pickupRadius: 34,
   cap: 200 // oldest motes are recycled past this (no accumulation)
 };
+
+/* ------------------------------------------------- вторая валюта: плазма */
+
+/** Плазма: падает с убитых клеток чаще, чем биомасса. Тратится только в лавках. */
+export const PLASMA = {
+  startAmount: 0, // сколько плазмы игрок получает на старте забега
+  /** Базовый шанс выпадения плазмы с одного убитого врага. */
+  baseChance: 0.45,
+  /** Индивидуальный шанс выпадения по типу врага (перекрывает baseChance). */
+  perEnemyChance: {
+    'enemy-a': 0.5, // быстрый слабый враг
+    'enemy-b': 0.65, // средний враг
+    'enemy-c': 1.0 // тяжёлый враг — всегда роняет плазму
+  },
+  valueMin: 1, // минимальное количество плазмы за одно выпадение
+  valueMax: 1, // максимальное количество плазмы за одно выпадение
+  pickupRadius: 34, // радиус автоподбора капель плазмы
+  cap: 120, // лимит капель плазмы на карте (старые перерабатываются)
+  /** Отображение капли плазмы на полу (форма, размер, цвет, свечение). */
+  radius: 7,
+  color: 0xff5fd2, // основной цвет плазмы (малиново-фиолетовый)
+  glowColor: 0xffffff
+};
+
+/* ------------------------------------------------------- лавки в комнатах */
+
+/**
+ * Лавка: вместо боевой комнаты генерируется комната с торговцем.
+ * Гарантия: минимум одна лавка на каждые `guaranteedEvery` комнат.
+ */
+export const SHOP = {
+  chance: 0.07, // случайный шанс стать лавкой для очередной комнаты
+  guaranteedEvery: 2, // хотя бы одна лавка на каждые N комнат (сверх стартовой)
+  maxShare: 0.15, // не более этой доли от всех комнат может быть лавками
+  offersMin: 3, // сколько товаров генерируется в лавке
+  offersMax: 5,
+  priceMultiplier: {
+    upgrade: 1, // множитель цены для улучшений характеристик
+    artifact: 3 // множитель цены для артефактов
+  },
+  priceBaseUpgrade: 5, // базовая цена улучшения 1-го уровня
+  priceStepUpgrade: 3, // прибавка к цене за каждый уже приобретённый уровень
+  priceBaseArtifact: 12, // базовая цена артефакта
+  priceStepArtifact: 6, // прибавка к цене за каждый уже приобретённый уровень
+  visitMarkup: 1.15, // наценка за каждое новое посещение лавки (дробная, шаг 5%)
+  /* Комната лавки остаётся без монстров и считается «зачищенной» сразу. */
+  clearOnEnter: true,
+  /* Физическая лавка: стенды-наросты с товаром (как в рогаликах). */
+  standRadius: 26, // радиус тела стенда (блокирует проход)
+  standSpacingX: 170, // шаг сетки стендов по горизонтали
+  standSpacingY: 170, // шаг сетки стендов по вертикали
+  interactRadius: 130, // дистанция покупки по E
+  doorClearance: 120, // не ближе этого к устью дверей
+  labelFont: '12px',
+};
+
+/* ------------------------------------------------------------- артефакты */
+
+/** Артефакты игрока: максимум `slots` активных одновременно. */
+export const ARTIFACTS = {
+  slots: 5,
+  /** Максимальный уровень любого артефакта. */
+  maxLevel: 5
+};
+
+/**
+ * Каталог артефактов (id — ключ в сохранении, не меняйте у существующих).
+ * Эффекты применяются в RunState.computeHero() и сцене боя.
+ */
+export const ARTIFACT_CATALOG = [
+  {
+    id: 'fang', name: 'Клык', maxLevel: 5,
+    desc: '+0.5 к силе атаки героя за уровень.',
+    effect: { attack: 0.5 }
+  },
+  {
+    id: 'carapace', name: 'Панцирная пластина', maxLevel: 5,
+    desc: '+22 к максимальному здоровью героя за уровень (и лечит на эту же величину).',
+    effect: { health: 22 }
+  },
+  {
+    id: 'springs', name: 'Пружинные волокна', maxLevel: 3,
+    desc: '+8% к скорости передвижения героя за уровень.',
+    effect: { moveSpeedPct: 0.08 }
+  },
+  {
+    id: 'core', name: 'Перегруженное ядро', maxLevel: 3,
+    desc: '+18% к скорости атаки героя за уровень.',
+    effect: { attackSpeedPct: 0.18 }
+  },
+  {
+    id: 'clinging', name: 'Прилипающие мембраны', maxLevel: 3,
+    desc: '+15% к радиусу подбора биомассы и плазмы за уровень.',
+    effect: { pickupPct: 0.15 }
+  },
+  {
+    id: 'regennode', name: 'Регенеративный узел', maxLevel: 3,
+    desc: '+0.6 HP в секунду герою за уровень.',
+    effect: { regen: 0.6 }
+  },
+  {
+    id: 'thorns', name: 'Шиповатая оболочка', maxLevel: 3,
+    desc: 'Атакующий героя получает 4 урона за уровень.',
+    effect: { thorns: 4 }
+  },
+  {
+    id: 'leech', name: 'Пиявка', maxLevel: 3,
+    desc: '+2 HP герою за каждое убийство за уровень.',
+    effect: { leech: 2 }
+  },
+  {
+    id: 'scope', name: 'Прицельный глаз', maxLevel: 3,
+    desc: '+12% к дальности атаки героя за уровень.',
+    effect: { rangePct: 0.12 }
+  }
+];
 
 export const WEAPON = {
   range: 520,
@@ -106,8 +228,8 @@ export const GAME_VIEW = {
 
 /** XP curve: biomass to go from level L to L+1. */
 export const PROGRESSION = {
-  baseBiomass: 6,
-  growthFactor: 1.35,
+  baseBiomass: 3,
+  growthFactor: 1.2,
   maxQueuedLevels: 10 // safety cap for bulk XP gains
 };
 
@@ -135,7 +257,7 @@ export const ALLY_TYPES = {
   hunter: {
     name: 'Hunter',
     role: 'Pursues the nearest enemy and strikes it down.',
-    attack: 1, attackIntervalMs: 850, moveSpeed: 245, maxHealth: 34,
+    attack: 5, attackIntervalMs: 850, moveSpeed: 245, maxHealth: 54,
     range: 80, bodyR: 11, tint: 0x46d8ff
   },
   defender: {
@@ -147,7 +269,7 @@ export const ALLY_TYPES = {
   parasite: {
     name: 'Parasite',
     role: 'Fragile but relentless: very frequent weak bites.',
-    attack: 0.5, attackIntervalMs: 400, moveSpeed: 215, maxHealth: 22,
+    attack: 3, attackIntervalMs: 300, moveSpeed: 215, maxHealth: 42,
     range: 70, bodyR: 9, tint: 0xb8f53d
   }
 };
@@ -174,7 +296,39 @@ export const UPGRADES = {
   regen: { name: 'Accelerated regeneration', target: 'hero', desc: '+0.8 HP/s per level', perLevel: 0.8, maxLevel: 5 },
   adaptation: { name: 'Collective adaptation', target: 'cells', desc: '+30% cells max health per level', perLevel: 0.3, maxLevel: 5 },
   sync: { name: 'Synchronization', target: 'cells', desc: '+20% cells attack speed per level', perLevel: 0.2, maxLevel: 5 },
-  swift: { name: 'Enhanced motility', target: 'hero', desc: '+8% hero move speed per level', perLevel: 0.08, maxLevel: 5 }
+  swift: { name: 'Enhanced motility', target: 'hero', desc: '+8% hero move speed per level', perLevel: 0.08, maxLevel: 5 },
+  // Рой: +1 к лимиту содружественных клеток под контролем за уровень.
+  swarm: { name: 'Swarm', target: 'colony', desc: '+1 friendly cell slot', perLevel: 1, maxLevel: 2 }
+};
+
+/* ------------------------------------------------- наросты (добыча) */
+
+/**
+ * Наросты: разрушаемые мясистые образования на полу комнат.
+ * Не блокируют движение (мягкая ткань) — ломаются снарядами героя.
+ * Из нароста выпадают: биомасса, плазма, редко — артефакт или клетка.
+ */
+export const GROWTHS = {
+  minPerRoom: 1, // минимум наростов в обычной комнате
+  maxPerRoom: 3, // максимум наростов в обычной комнате
+  startRoomMax: 1, // в стартовой комнате не больше одного (знакомство с механикой)
+  hpMin: 3, // минимальная прочность нароста (попаданий)
+  hpMax: 6, // максимальная прочность нароста
+  radiusMin: 14, // минимальный радиус тела нароста
+  radiusMax: 24, // максимальный радиус тела нароста
+  inset: 70, // отступ от стен комнаты
+  obstaclePad: 30, // зазор от препятствий-стенок
+  doorClearance: 70, // не ближе этого к устью дверей (не загораживать проход визуально)
+  minSeparation: 90, // минимальная дистанция между наростами
+  dropBiomassChance: 0.55, // шанс выпадения биомассы
+  dropBiomassMin: 1, // минимум мот биомассы
+  dropBiomassMax: 3, // максимум мот биомассы
+  dropPlasmaChance: 0.5, // шанс выпадения плазмы
+  dropPlasmaMin: 1, // минимум капель плазмы
+  dropPlasmaMax: 2, // максимум капель плазмы
+  dropArtifactChance: 0.03, // шанс готового артефакта 1-го уровня
+  dropCellChance: 0.02, // шанс дружественной клетки (случайный тип)
+  fallbackPlasma: 5 // плазма вместо артефакта/клетки, если некуда положить
 };
 
 /**

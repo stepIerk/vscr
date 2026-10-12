@@ -10,9 +10,13 @@
 
 import {
   HERO_BASE, ALLY_TYPES, MUTATIONS, UPGRADES, ALLIES,
-  PROGRESSION, requiredBiomass
+  PROGRESSION, requiredBiomass, PLASMA, ARTIFACTS, RESOURCE, WEAPON
 } from '../config.js';
 import { CARDS } from './cards.js';
+import { artifactSum, artifactPct, artifactLevel } from './artifacts.js';
+
+const RESOURCE_PICKUP = RESOURCE.pickupRadius;
+const WEAPON_RANGE = WEAPON.range;
 
 let uid = 1;
 
@@ -24,11 +28,15 @@ export class RunState {
   reset() {
     this.level = 1;
     this.xp = 0; // biomass progress toward the NEXT level (surplus kept)
-    this.cells = []; // live instances: {id,type,merge,mutations,hp,cd,targetKey}
+    this.plasma = PLASMA.startAmount; // вторая валюта (лавки)
+    this.artifacts = {}; // artifactId -> level (0 = not owned)
+    this.activeArtifacts = []; // up to ARTIFACTS.slots ids
+    this.cells = []; // live instances: {id,type,merge,...}
     this.nextCellId = 1;
     this.heroMutations = {}; // key -> level
     this.upgrades = {}; // key -> level
     this.maxCells = ALLIES.max;
+    this.shopVisits = 0; // сколько раз игрок заходил в любую лавку (наценка)
   }
 
   // ------------------------------------------------------------ XP / level
@@ -138,6 +146,8 @@ export class RunState {
   applyUpgrade(key) {
     const max = UPGRADES[key].maxLevel;
     this.upgrades[key] = Math.min(max, (this.upgrades[key] || 0) + 1);
+    // «Рой» расширяет лимит клеток сразу (draft/colony/HUD читают maxCells).
+    if (key === 'swarm') this.maxCells = ALLIES.max + this.upgrades.swarm;
     return this.upgrades[key];
   }
 
@@ -152,19 +162,74 @@ export class RunState {
     return null;
   }
 
+  // ---------------------------------------------------------------- plasma
+
+  addPlasma(n) {
+    this.plasma += n;
+    return this.plasma;
+  }
+
+  spendPlasma(n) {
+    if (this.plasma < n) return false;
+    this.plasma -= n;
+    return true;
+  }
+
+  // -------------------------------------------------------------- artifacts
+
+  /** Buy/level an artifact: acquires it and activates it if a slot is free. */
+  buyArtifact(id, def) {
+    const max = def ? def.maxLevel : ARTIFACTS.maxLevel;
+    this.artifacts[id] = Math.min(max, (this.artifacts[id] || 0) + 1);
+    if (!this.activeArtifacts.includes(id) && this.activeArtifacts.length < ARTIFACTS.slots) {
+      this.activeArtifacts.push(id);
+      return { leveled: true, activated: true };
+    }
+    return { leveled: true, activated: this.activeArtifacts.includes(id) };
+  }
+
+  /** Toggle artifact into an active slot. Never exceeds the slot limit. */
+  setArtifactActive(id, on) {
+    const has = this.activeArtifacts.includes(id);
+    if (on) {
+      if (has) return { ok: true };
+      if (this.activeArtifacts.length >= ARTIFACTS.slots) {
+        return { ok: false, reason: `Активных артефактов не больше ${ARTIFACTS.slots}` };
+      }
+      this.activeArtifacts.push(id);
+      return { ok: true };
+    }
+    this.activeArtifacts = this.activeArtifacts.filter((x) => x !== id);
+    return { ok: true };
+  }
+
   // ----------------------------------------------------------------- stats
 
   computeHero() {
     const mut = (k) => this.heroMutations[k] || 0;
     const up = (k) => this.upgrades[k] || 0;
-    const aps = (1000 / HERO_BASE.attackIntervalMs) * (1 + MUTATIONS.metabolism.speedBonus * mut('metabolism'));
+    // База + улучшения (процентные), затем мутации (плоские), затем артефакты.
+    let attack =
+      (HERO_BASE.attack * (1 + UPGRADES.pulse.perLevel * up('pulse')) +
+        MUTATIONS.acid.damageBonus * mut('acid') +
+        artifactSum(this, 'attack'));
+    const apsBase = (1000 / HERO_BASE.attackIntervalMs) * (1 + MUTATIONS.metabolism.speedBonus * mut('metabolism'));
+    const aps = apsBase * (1 + artifactPct(this, 'attackSpeedPct'));
+    const maxHealth =
+      HERO_BASE.maxHealth +
+      MUTATIONS.membrane.healthBonus * mut('membrane') +
+      artifactSum(this, 'health');
     return {
-      attack: HERO_BASE.attack * (1 + UPGRADES.pulse.perLevel * up('pulse')) + MUTATIONS.acid.damageBonus * mut('acid'),
+      attack,
       intervalMs: 1000 / aps,
       attackSpeed: aps,
-      moveSpeed: HERO_BASE.moveSpeed * (1 + UPGRADES.swift.perLevel * up('swift')),
-      maxHealth: HERO_BASE.maxHealth + MUTATIONS.membrane.healthBonus * mut('membrane'),
-      regen: UPGRADES.regen.perLevel * up('regen')
+      moveSpeed: HERO_BASE.moveSpeed * (1 + UPGRADES.swift.perLevel * up('swift')) * (1 + artifactPct(this, 'moveSpeedPct')),
+      maxHealth,
+      regen: UPGRADES.regen.perLevel * up('regen') + artifactSum(this, 'regen'),
+      pickupRadius: Math.round(RESOURCE_PICKUP * (1 + artifactPct(this, 'pickupPct'))),
+      attackRange: Math.round(WEAPON_RANGE * (1 + artifactPct(this, 'rangePct'))),
+      thorns: artifactSum(this, 'thorns'),
+      leech: artifactSum(this, 'leech')
     };
   }
 
@@ -199,6 +264,12 @@ export class RunState {
 
   upgradeAvailable(key) {
     return (this.upgrades[key] || 0) < UPGRADES[key].maxLevel;
+  }
+
+  /** Shop visit counter grows with every shop entry (affects prices). */
+  noteShopVisit() {
+    this.shopVisits += 1;
+    return this.shopVisits;
   }
 
   /** Three distinct, currently meaningful options. Never an invalid card. */

@@ -16,6 +16,7 @@
  */
 
 import { mulberry32, range, int, shuffle, clamp } from './rng.js';
+import { SHOP } from '../config.js';
 
 export const GEN_DEFAULTS = {
   roomCountMin: 12,
@@ -36,6 +37,7 @@ export const GEN_DEFAULTS = {
   spawnAreaPer: 70000, // room area funding one spawn point
   spawnMin: 3,
   spawnMax: 9,
+  wingRooms: 15, // rooms per expansion wing
   extraEdgeProb: 0.22, // chance to re-add a short non-MST edge (loops)
   extraEdgeMaxDist: 1500
 };
@@ -100,62 +102,50 @@ class UnionFind {
 
 // -------------------------------------------------------------- generation
 
-export function generateLayout(seed, opts = {}) {
-  const o = { ...GEN_DEFAULTS, ...opts };
-  const rng = mulberry32(seed);
-  const T = o.wall;
-
-  // --- 1. rooms ---
-  const targetCount = int(rng, o.roomCountMin, o.roomCountMax);
+/**
+ * Scatter non-overlapping rects. `sample()` yields {x,y,w,h} candidates;
+ * `avoid` lists rects to keep clear of (roomPad around candidates).
+ * Pure + deterministic for a given rng stream.
+ */
+function scatterRooms(rng, count, o, sample, avoid, idStart = 0, guardMax = 4000) {
   const rooms = [];
-  const startW = range(rng, o.startRoomMin, o.roomMax);
-  const startH = range(rng, o.startRoomMin, o.roomMax);
-  rooms.push({
-    id: 0,
-    x: o.field / 2 - startW / 2,
-    y: o.field / 2 - startH / 2,
-    w: startW,
-    h: startH,
-    isStart: true
-  });
-
   let guard = 0;
-  while (rooms.length < targetCount && guard < 4000) {
+  while (rooms.length < count && guard < guardMax) {
     guard++;
-    const w = range(rng, o.roomMin, o.roomMax);
-    const h = range(rng, o.roomMin, o.roomMax);
-    const x = range(rng, 0, o.field - w);
-    const y = range(rng, 0, o.field - h);
-    const cand = { x, y, w, h };
-    const ok = rooms.every(
-      (r) =>
-        !rectsOverlap(
-          { x: cand.x - o.roomPad, y: cand.y - o.roomPad, w: cand.w + o.roomPad * 2, h: cand.h + o.roomPad * 2 },
-          r
-        )
-    );
-    if (ok) rooms.push({ id: rooms.length, x, y, w, h, isStart: false });
+    const cand = sample();
+    const padded = {
+      x: cand.x - o.roomPad, y: cand.y - o.roomPad,
+      w: cand.w + o.roomPad * 2, h: cand.h + o.roomPad * 2
+    };
+    const ok =
+      avoid.every((r) => !rectsOverlap(padded, r)) &&
+      rooms.every((r) => !rectsOverlap(padded, r));
+    if (ok) rooms.push({ id: idStart + rooms.length, ...cand, isStart: false });
   }
   for (const r of rooms) {
     r.cx = r.x + r.w / 2;
     r.cy = r.y + r.h / 2;
   }
+  return rooms;
+}
 
-  // --- 2. connection graph: Kruskal MST + short loop edges ---
+/** Kruskal MST over room centers + short loop edges. Uses room ids. */
+function linkRooms(rng, rooms, o) {
   const edges = [];
   for (let i = 0; i < rooms.length; i++) {
     for (let j = i + 1; j < rooms.length; j++) {
       const dx = rooms[i].cx - rooms[j].cx;
       const dy = rooms[i].cy - rooms[j].cy;
-      edges.push({ a: i, b: j, d: Math.hypot(dx, dy) });
+      edges.push({ a: rooms[i].id, b: rooms[j].id, d: Math.hypot(dx, dy) });
     }
   }
   edges.sort((p, q) => p.d - q.d);
   const uf = new UnionFind(rooms.length);
+  const indexOf = new Map(rooms.map((r, i) => [r.id, i]));
   const links = [];
   const used = new Set();
   for (const e of edges) {
-    if (uf.union(e.a, e.b)) {
+    if (uf.union(indexOf.get(e.a), indexOf.get(e.b))) {
       links.push(e);
       used.add(e.a + ':' + e.b);
     }
@@ -169,13 +159,16 @@ export function generateLayout(seed, opts = {}) {
     if (links.length >= rooms.length - 1 + Math.ceil(rooms.length / 3)) break;
     if (rng() < o.extraEdgeProb) links.push(e);
   }
+  return links;
+}
 
-  // --- 3. L-shaped corridors (center to center, random elbow) ---
+/** L-shaped center-to-center corridors (random elbow order) + joint filler. */
+function routeCorridors(rng, roomsById, links, o) {
   const HW = o.tunnelWidth / 2;
   const MIN_SEG = 8; // elbow nearly on a room center: drop the stub, go straight
-  const corridors = links.map(({ a, b }) => {
-    const A = rooms[a];
-    const B = rooms[b];
+  return links.map(({ a, b }) => {
+    const A = roomsById.get(a);
+    const B = roomsById.get(b);
     const elbow = rng() < 0.5 ? { x: B.cx, y: A.cy } : { x: A.cx, y: B.cy };
     const rects = [];
     const s1 = normalizeRect(A.cx, A.cy, elbow.x, elbow.y);
@@ -211,50 +204,55 @@ export function generateLayout(seed, opts = {}) {
     if (joint) rects.push({ x: joint.x - HW, y: joint.y - HW, w: HW * 2, h: HW * 2, filler: true });
     return { a, b, joint, rects };
   });
-  const corridorRects = corridors.flatMap((c) => c.rects);
+}
 
-  // --- 4. room walls with door gaps ---
-  for (const r of rooms) {
-    // gaps per side as intervals along the wall axis
-    const gaps = { N: [], S: [], W: [], E: [] };
-    for (const c of corridorRects) {
-      if (!rectsOverlap(c, r)) continue;
-      const [ox0, ox1] = overlapRange(c.x, c.x + c.w, r.x, r.x + r.w);
-      const [oy0, oy1] = overlapRange(c.y, c.y + c.h, r.y, r.y + r.h);
-      if (ox1 - ox0 <= 0 || oy1 - oy0 <= 0) continue;
-      const m = o.gapMargin;
-      if (c.y < r.y) gaps.N.push([ox0 - m, ox1 + m]); // corridor comes from north
-      if (c.y + c.h > r.y + r.h) gaps.S.push([ox0 - m, ox1 + m]);
-      if (c.x < r.x) gaps.W.push([oy0 - m, oy1 + m]);
-      if (c.x + c.w > r.x + r.w) gaps.E.push([oy0 - m, oy1 + m]);
-    }
-    r.gaps = gaps;
-    r.doors = [];
-    const runs = [];
-    // North / South walls span the full outer width (corners included).
-    for (const [lo, hi] of subtractIntervals(r.x - T, r.x + r.w + T, gaps.N))
-      runs.push({ x: lo, y: r.y - T, w: hi - lo, h: T });
-    for (const [lo, hi] of subtractIntervals(r.x - T, r.x + r.w + T, gaps.S))
-      runs.push({ x: lo, y: r.y + r.h, w: hi - lo, h: T });
-    // West / East walls span interior height only (corners owned by N/S).
-    for (const [lo, hi] of subtractIntervals(r.y, r.y + r.h, gaps.W))
-      runs.push({ x: r.x - T, y: lo, w: T, h: hi - lo });
-    for (const [lo, hi] of subtractIntervals(r.y, r.y + r.h, gaps.E))
-      runs.push({ x: r.x + r.w, y: lo, w: T, h: hi - lo });
-    r.wallRuns = runs;
-    // Record door centers (for validation + tests).
-    const pushDoors = (list, side, fixed) =>
-      list.forEach(([a, b]) => {
-        const mid = (clamp(a, -1e9, 1e9) + clamp(b, -1e9, 1e9)) / 2;
-        r.doors.push({ side, at: mid, fixed });
-      });
-    pushDoors(gaps.N, 'N', r.y);
-    pushDoors(gaps.S, 'S', r.y + r.h);
-    pushDoors(gaps.W, 'W', r.x);
-    pushDoors(gaps.E, 'E', r.x + r.w);
+/** (Re)build one room's perimeter walls with door gaps. Idempotent. */
+function buildRoomWalls(room, corridorRects, o) {
+  const T = o.wall;
+  const r = room;
+  // gaps per side as intervals along the wall axis
+  const gaps = { N: [], S: [], W: [], E: [] };
+  for (const c of corridorRects) {
+    if (!rectsOverlap(c, r)) continue;
+    const [ox0, ox1] = overlapRange(c.x, c.x + c.w, r.x, r.x + r.w);
+    const [oy0, oy1] = overlapRange(c.y, c.y + c.h, r.y, r.y + r.h);
+    if (ox1 - ox0 <= 0 || oy1 - oy0 <= 0) continue;
+    const m = o.gapMargin;
+    if (c.y < r.y) gaps.N.push([ox0 - m, ox1 + m]); // corridor comes from north
+    if (c.y + c.h > r.y + r.h) gaps.S.push([ox0 - m, ox1 + m]);
+    if (c.x < r.x) gaps.W.push([oy0 - m, oy1 + m]);
+    if (c.x + c.w > r.x + r.w) gaps.E.push([oy0 - m, oy1 + m]);
   }
+  r.gaps = gaps;
+  r.doors = [];
+  const runs = [];
+  // North / South walls span the full outer width (corners included).
+  for (const [lo, hi] of subtractIntervals(r.x - T, r.x + r.w + T, gaps.N))
+    runs.push({ x: lo, y: r.y - T, w: hi - lo, h: T });
+  for (const [lo, hi] of subtractIntervals(r.x - T, r.x + r.w + T, gaps.S))
+    runs.push({ x: lo, y: r.y + r.h, w: hi - lo, h: T });
+  // West / East walls span interior height only (corners owned by N/S).
+  for (const [lo, hi] of subtractIntervals(r.y, r.y + r.h, gaps.W))
+    runs.push({ x: r.x - T, y: lo, w: T, h: hi - lo });
+  for (const [lo, hi] of subtractIntervals(r.y, r.y + r.h, gaps.E))
+    runs.push({ x: r.x + r.w, y: lo, w: T, h: hi - lo });
+  r.wallRuns = runs;
+  // Record door centers (for validation + tests).
+  const pushDoors = (list, side, fixed) =>
+    list.forEach(([a, b]) => {
+      const mid = (clamp(a, -1e9, 1e9) + clamp(b, -1e9, 1e9)) / 2;
+      r.doors.push({ side, at: mid, fixed });
+    });
+  pushDoors(gaps.N, 'N', r.y);
+  pushDoors(gaps.S, 'S', r.y + r.h);
+  pushDoors(gaps.W, 'W', r.x);
+  pushDoors(gaps.E, 'E', r.x + r.w);
+}
 
-  // --- corridor side walls (gaps where rooms / other corridors cross) ---
+/** Side walls for corridor rects, with gaps at rooms / crossings. */
+function buildCorridorWalls(corridorRects, rooms, o) {
+  const T = o.wall;
+  const HW = o.tunnelWidth / 2;
   const gapM = o.gapMargin;
   // Bands overshoot each segment end by HW + T so L-elbows get a fully
   // closed outer corner (the diagonal notch included). Overshoot inside rooms
@@ -297,6 +295,91 @@ export function generateLayout(seed, opts = {}) {
       }
     }
   });
+  return corridorWalls;
+}
+
+/** Rebuild the flat solids list from current rooms/walls/obstacles. */
+export function rebuildSolids(layout) {
+  layout.solids = [
+    ...layout.rooms.flatMap((r) => r.wallRuns),
+    ...(layout.corridorWalls || []),
+    ...layout.rooms.flatMap((r) => r.obstacles)
+  ];
+}
+
+export function computeBounds(floors, solids) {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const f of [...floors, ...solids]) {
+    x0 = Math.min(x0, f.x);
+    y0 = Math.min(y0, f.y);
+    x1 = Math.max(x1, f.x + f.w);
+    y1 = Math.max(y1, f.y + f.h);
+  }
+  const M = 220;
+  return { x: x0 - M, y: y0 - M, w: x1 - x0 + M * 2, h: y1 - y0 + M * 2 };
+}
+
+/** Degree (link count) per room id — gateways, dead-ends, fog adjacency. */
+export function roomDegrees(layout) {
+  const deg = new Map(layout.rooms.map((r) => [r.id, 0]));
+  for (const l of layout.links) {
+    deg.set(l.a, (deg.get(l.a) || 0) + 1);
+    deg.set(l.b, (deg.get(l.b) || 0) + 1);
+  }
+  return deg;
+}
+
+export function generateLayout(seed, opts = {}) {
+  const o = { ...GEN_DEFAULTS, ...opts };
+  const rng = mulberry32(seed);
+
+  // --- 1. rooms (start room first, then scattered rest) ---
+  const targetCount = int(rng, o.roomCountMin, o.roomCountMax);
+  const startW = range(rng, o.startRoomMin, o.roomMax);
+  const startH = range(rng, o.startRoomMin, o.roomMax);
+  const start = {
+    id: 0,
+    x: o.field / 2 - startW / 2,
+    y: o.field / 2 - startH / 2,
+    w: startW,
+    h: startH,
+    isStart: true
+  };
+  start.cx = start.x + start.w / 2;
+  start.cy = start.y + start.h / 2;
+  start.type = 'combat'; // стартовая комната всегда боевая (без спавнов)
+  const rooms = [
+    start,
+    ...scatterRooms(
+      rng,
+      targetCount - 1,
+      o,
+      () => {
+        const w = range(rng, o.roomMin, o.roomMax);
+        const h = range(rng, o.roomMin, o.roomMax);
+        return { x: range(rng, 0, o.field - w), y: range(rng, 0, o.field - h), w, h };
+      },
+      [start],
+      1
+    )
+  ];
+
+  // --- 2. connection graph: Kruskal MST + short loop edges ---
+  const links = linkRooms(rng, rooms, o);
+
+  // --- 3. L-shaped corridors (center to center, random elbow) ---
+  const byId = new Map(rooms.map((r) => [r.id, r]));
+  const corridors = routeCorridors(rng, byId, links, o);
+  const corridorRects = corridors.flatMap((c) => c.rects);
+
+  // --- 4. room walls with door gaps ---
+  for (const r of rooms) buildRoomWalls(r, corridorRects, o);
+
+  // --- corridor side walls (gaps where rooms / other corridors cross) ---
+  const corridorWalls = buildCorridorWalls(corridorRects, rooms, o);
 
   // --- 5. interior wall-block obstacles (same walls as the perimeter) ---
   for (const r of rooms) {
@@ -308,29 +391,124 @@ export function generateLayout(seed, opts = {}) {
     r.spawns = r.isStart ? [] : placeSpawns(rng, r, o);
   }
 
+  // --- 7. room kinds: combat (monsters) vs shop (trader) ---
+  assignShopTypes(rng, rooms);
+
   const floors = [
     ...rooms.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, roomId: r.id })),
     ...corridorRects.map((c) => ({ ...c, roomId: -1 }))
   ];
-  const solids = [...rooms.flatMap((r) => r.wallRuns), ...corridorWalls, ...rooms.flatMap((r) => r.obstacles)];
 
-  // --- bounds ---
-  let x0 = Infinity,
-    y0 = Infinity,
-    x1 = -Infinity,
-    y1 = -Infinity;
-  for (const f of [...floors, ...solids]) {
-    x0 = Math.min(x0, f.x);
-    y0 = Math.min(y0, f.y);
-    x1 = Math.max(x1, f.x + f.w);
-    y1 = Math.max(y1, f.y + f.h);
-  }
-  const M = 220;
-  const bounds = { x: x0 - M, y: y0 - M, w: x1 - x0 + M * 2, h: y1 - y0 + M * 2 };
+  const layout = { seed, rooms, links, corridors, floors, solids: [], corridorWalls, bounds: null, wall: o.wall };
+  rebuildSolids(layout);
+  layout.bounds = computeBounds(floors, layout.solids);
 
-  const layout = { seed, rooms, links, corridors, floors, solids, bounds, wall: T };
   layout.issues = validateLayout(layout);
   return layout;
+}
+
+// ---------------------------------------------------------- expansion wing
+
+/**
+ * Grow a continuation wing off an existing layout: `wingRooms` new rooms
+ * scattered outward from a gateway (dead-end) room, linked to it and meshed
+ * among themselves, then merged into the layout (rooms/links/corridors/
+ * floors/solids/bounds/issues all updated in place).
+ *
+ * Deterministic wing CONTENT for (baseSeed, wingIndex); the attach point
+ * (gatewayId) is gameplay-dependent by design.
+ * Returns { roomIds, gatewayId } or null when no free space was found.
+ */
+export function generateWing(baseSeed, wingIndex, layout, gatewayId, opts = {}) {
+  const o = { ...GEN_DEFAULTS, ...opts };
+  const rng = mulberry32((((baseSeed >>> 0) ^ Math.imul(wingIndex + 1, 0x9e3779b9)) >>> 0) || 1);
+  const rooms = layout.rooms;
+  const byId = new Map(rooms.map((r) => [r.id, r]));
+  const gateway = byId.get(gatewayId);
+  if (!gateway) return null;
+
+  // Outward direction: through the gateway, away from its first neighbor.
+  const nb = layout.links.find((l) => l.a === gatewayId || l.b === gatewayId);
+  let baseAng;
+  if (nb) {
+    const other = byId.get(nb.a === gatewayId ? nb.b : nb.a);
+    baseAng = Math.atan2(gateway.cy - other.cy, gateway.cx - other.cx);
+  } else {
+    baseAng = rng() * Math.PI * 2;
+  }
+
+  const count = o.wingRooms;
+  const baseId = Math.max(...rooms.map((r) => r.id)) + 1;
+  const place = (radius, guardMax) => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const a = baseAng + attempt * (Math.PI / 5);
+      const dist = 3400 + attempt * 400;
+      const ccx = gateway.cx + Math.cos(a) * dist;
+      const ccy = gateway.cy + Math.sin(a) * dist;
+      const cand = scatterRooms(
+        rng,
+        count,
+        o,
+        () => {
+          const w = range(rng, o.roomMin, o.roomMax);
+          const h = range(rng, o.roomMin, o.roomMax);
+          const ang = rng() * Math.PI * 2;
+          const rad = Math.sqrt(rng()) * radius;
+          return { x: ccx + Math.cos(ang) * rad - w / 2, y: ccy + Math.sin(ang) * rad - h / 2, w, h };
+        },
+        rooms,
+        baseId,
+        guardMax
+      );
+      if (cand.length >= count) return cand;
+    }
+    return null;
+  };
+  let placed = place(2600, 12000);
+  if (!placed) placed = place(3300, 20000); // fallback: wider net
+  if (!placed) return null;
+  const newRooms = placed;
+
+  // Uplink: gateway to its nearest new room, then mesh the wing internally.
+  let best = newRooms[0];
+  let bd = Infinity;
+  for (const r of newRooms) {
+    const d = Math.hypot(r.cx - gateway.cx, r.cy - gateway.cy);
+    if (d < bd) {
+      bd = d;
+      best = r;
+    }
+  }
+  const links = [{ a: gatewayId, b: best.id, d: bd }, ...linkRooms(rng, newRooms, o)];
+
+  const allById = new Map([...rooms, ...newRooms].map((r) => [r.id, r]));
+  const corridors = routeCorridors(rng, allById, links, o);
+  const newCorrRects = corridors.flatMap((c) => c.rects);
+  const allCorrRects = [...layout.corridors.flatMap((c) => c.rects), ...newCorrRects];
+
+  // Gateway walls are rebuilt with the new door; new rooms get full treatment.
+  buildRoomWalls(gateway, allCorrRects, o);
+  for (const r of newRooms) {
+    buildRoomWalls(r, allCorrRects, o);
+    r.obstacles = placeObstacles(rng, r, o);
+  }
+  for (const r of newRooms) r.spawns = placeSpawns(rng, r, o);
+
+  layout.corridorWalls = buildCorridorWalls(allCorrRects, [...rooms, ...newRooms], o);
+  layout.rooms.push(...newRooms);
+  // Типы комнат считаются по ОБЩЕЙ нумерации — гарантия «лавка раз в 10
+  // комнат» продолжает работать при расширении карты.
+  assignShopTypes(rng, layout.rooms);
+  layout.links.push(...links);
+  layout.corridors.push(...corridors);
+  layout.floors.push(
+    ...newRooms.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, roomId: r.id })),
+    ...newCorrRects.map((c) => ({ ...c, roomId: -1 }))
+  );
+  rebuildSolids(layout);
+  layout.bounds = computeBounds(layout.floors, layout.solids);
+  layout.issues = validateLayout(layout);
+  return { roomIds: newRooms.map((r) => r.id), gatewayId, corridorCount: corridors.length };
 }
 
 // ------------------------------------------------------- interior obstacles
@@ -422,6 +600,35 @@ function placeSpawns(rng, r, o) {
     pts.push({ x, y });
   }
   return pts;
+}
+
+// --------------------------------------------------------- room kinds (shop)
+
+/**
+ * Разметка комнат: 'combat' (с монстрами) или 'shop' (лавка).
+ * - Стартовая комната всегда боевая и без спавнов (см. placeSpawns).
+ * - Гарантия: каждая 10-я нестартовая комната становится лавкой.
+ * - Случайный шанс для остальных + предел доли лавок (SHOP.maxShare).
+ * Уже размеченные комнаты не трогаются, поэтому порядок генерации стабилен.
+ */
+export function assignShopTypes(rng, rooms) {
+  const normal = rooms.filter((r) => !r.isStart);
+  const total = normal.length || 1;
+  const maxShops = Math.floor(total * SHOP.maxShare);
+  let shops = normal.filter((r) => r.type === 'shop').length;
+  const idxOf = new Map(normal.map((r, i) => [r.id, i]));
+  for (const r of normal) {
+    if (r.type) continue; // уже размечена ранее
+    const idx = idxOf.get(r.id) ?? 0;
+    const forced = idx > 0 && idx % SHOP.guaranteedEvery === 0; // каждая 10-я
+    if (shops < maxShops && (forced || rng() < SHOP.chance)) {
+      r.type = 'shop';
+      r.spawns = []; // в лавке монстров нет
+      shops += 1;
+    } else {
+      r.type = 'combat';
+    }
+  }
 }
 
 // --------------------------------------------------------------- validation

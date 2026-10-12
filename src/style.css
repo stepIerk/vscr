@@ -132,9 +132,21 @@ body {
   transition: width 0.15s linear;
 }
 
+.hud-value.mote {
+  color: #9dffb0;
+}
+
+.hud-value.plasma {
+  color: #ff7ada;
+}
+
+.hud-row.hud-buttons {
+  gap: 8px;
+}
+
 .hud-btn {
   flex: 1;
-  padding: 8px 10px;
+  padding: 8px 6px;
   min-height: 36px;
   font: inherit;
   font-size: 12px;
@@ -173,6 +185,7 @@ body {
   align-items: center;
   justify-content: center;
   background: rgba(3, 5, 7, 0.72);
+  z-index: 30;
 }
 
 .gameover.hidden {
@@ -492,6 +505,67 @@ body {
   color: var(--accent);
 }
 
+/* ------------------------------------------------------------- shop */
+
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shop-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.shop-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.shop-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.shop-detail {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.shop-tag {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.shop-buy {
+  flex-shrink: 0;
+}
+
+.shop-buy:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.shop-buy.is-bought {
+  background: rgba(157, 255, 176, 0.25);
+  color: #9dffb0;
+}
+
+.colony-card.artifact.selected {
+  border-color: #ff7ada;
+  background: rgba(255, 122, 218, 0.08);
+}
+
 @media (max-width: 640px) {
   .panel {
     padding: 14px;
@@ -534,4 +608,27 @@ body {
     width: 128px;
     height: 128px;
   }
+}
+
+/* ------------------------------------------------------------- toast */
+
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  max-width: 90vw;
+  padding: 10px 18px;
+  font-size: 13px;
+  color: var(--text);
+  background: rgba(8, 14, 18, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 15;
+}
+
+.toast.hidden {
+  display: none;
 }

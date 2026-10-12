@@ -1,4 +1,19 @@
 import { generateLayout, pointInRect } from './src/world/generator.js';
+import { DUNGEON } from './src/config.js';
+
+// Тест генерирует мир теми же параметрами, что и сцена.
+const OPTS = {
+  roomCountMin: DUNGEON.roomCountMin,
+  roomCountMax: DUNGEON.roomCountMax,
+  roomMin: DUNGEON.roomMin,
+  roomMax: DUNGEON.roomMax,
+  startRoomMin: DUNGEON.startRoomMin,
+  tunnelWidth: DUNGEON.tunnelWidth,
+  wall: DUNGEON.wall,
+  spawnAreaPer: DUNGEON.spawnAreaPer,
+  spawnMin: DUNGEON.spawnMin,
+  spawnMax: DUNGEON.spawnMax
+};
 
 let fails = 0;
 const ok = (name, cond, extra = '') => {
@@ -7,15 +22,25 @@ const ok = (name, cond, extra = '') => {
 };
 
 for (const seed of [1, 7, 42, 4242, 1337, 2026, 99999]) {
-  const L = generateLayout(seed);
+  const L = generateLayout(seed, OPTS);
   const HW = 60, T = 24;
 
   ok(`seed ${seed}: no layout issues`, L.issues.length === 0, JSON.stringify(L.issues));
   ok(`seed ${seed}: 12-18 rooms`, L.rooms.length >= 12 && L.rooms.length <= 18, `${L.rooms.length}`);
-  ok(`seed ${seed}: room sizes 560-1080`, L.rooms.every((r) => r.w >= 560 && r.w <= 1080 && r.h >= 560 && r.h <= 1080));
-  const nonStart = L.rooms.filter((r) => !r.isStart);
-  ok(`seed ${seed}: 3-9 spawns/room`, nonStart.every((r) => r.spawns.length >= 3 && r.spawns.length <= 9),
-    `[${nonStart.map((r) => r.spawns.length)}]`);
+  // Стартовая комната может быть немного меньше обычной (startRoomMin).
+  const nonStartR = L.rooms.filter((r) => !r.isStart);
+  ok(`seed ${seed}: room sizes ${DUNGEON.roomMin}-${DUNGEON.roomMax}`,
+    nonStartR.every((r) => r.w >= DUNGEON.roomMin && r.w <= DUNGEON.roomMax && r.h >= DUNGEON.roomMin && r.h <= DUNGEON.roomMax),
+    `[${L.rooms.map((r) => Math.round(r.w)).join(',')}]`);
+  const nonStart = nonStartR;
+  ok(`seed ${seed}: start room typed combat`, L.rooms[0].type === 'combat' && L.rooms[0].spawns.length === 0);
+  const fighting = nonStart.filter((r) => r.type !== 'shop'); // лавки без спавнов
+  ok(`seed ${seed}: 3-9 spawns in fighting rooms`, fighting.every((r) => r.spawns.length >= 3 && r.spawns.length <= 9),
+    `[${fighting.map((r) => r.spawns.length)}]`);
+  // Гарантия лавки: каждая 10-я нестартовая комната — лавка.
+  const forcedOk = nonStart.every((r, i) => !(i > 0 && i % 10 === 0) || r.type === 'shop');
+  ok(`seed ${seed}: shop guaranteed every 10 rooms`, forcedOk,
+    `shops=${nonStart.filter((r) => r.type === 'shop').length}`);
 
   const inSolid = (x, y) => L.solids.some((s) => pointInRect(x, y, s, 0));
   const inFloor = (x, y) => L.floors.some((f) => pointInRect(x, y, f, 0));

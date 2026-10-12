@@ -225,4 +225,118 @@ export function hideAll() {
   hideDraft();
   hideTargets();
   hideColony();
+  hideShop();
+  hideArtifacts();
+}
+
+// --------------------------------------------------------------- shop
+
+/** Окно лавки: товар за плазму (улучшения и артефакты). */
+export function showShop(view) {
+  const o = overlay('shop-overlay');
+  o.classList.remove('hidden');
+  o.replaceChildren();
+  const box = el('div', 'panel shop-panel');
+  const head = el('div', 'colony-head');
+  const titleWrap = el('div');
+  titleWrap.appendChild(el('h2', 'panel-title', view.title));
+  titleWrap.appendChild(
+    el('div', 'panel-sub',
+      `Плазма: ${view.plasma ?? ''}${view.visits > 1 ? ` · посещение ${view.visits} (цены выросли)` : ''}`)
+  );
+  head.appendChild(titleWrap);
+  const close = el('button', 'ghost-btn', 'Закрыть');
+  close.type = 'button';
+  close.addEventListener('click', view.onClose);
+  head.appendChild(close);
+  box.appendChild(head);
+
+  const list = el('div', 'shop-list');
+  for (const off of view.offers) {
+    const row = el('div', 'shop-row');
+    const info = el('div', 'shop-info');
+    info.appendChild(el('div', 'shop-name', off.name));
+    info.appendChild(el('div', 'shop-detail', off.detail));
+    const tag = el('span', 'shop-tag', off.kind === 'artifact' ? 'Артефакт' : 'Улучшение');
+    info.appendChild(tag);
+    row.appendChild(info);
+    const btn = el('button', 'primary-btn shop-buy', off.bought ? 'Куплено' : `Купить · ${off.price}`);
+    btn.type = 'button';
+    btn.disabled = !!off.disabled;
+    if (off.bought) btn.classList.add('is-bought');
+    btn.addEventListener('click', () => view.onBuy(off));
+    row.appendChild(btn);
+    list.appendChild(row);
+  }
+  if (!view.offers.length) list.appendChild(el('div', 'empty-note', 'Товары закончились.'));
+  box.appendChild(list);
+  box.appendChild(
+    el('div', 'merge-reason',
+      'Улучшения применяются сразу. Артефакты занимают активные слоты (не больше 5) и настраиваются в инвентаре.')
+  );
+  o.appendChild(box);
+}
+
+export function hideShop() {
+  const o = document.getElementById('shop-overlay');
+  if (o) {
+    o.classList.add('hidden');
+    o.replaceChildren();
+  }
+}
+
+// ----------------------------------------------------- artifact inventory
+
+/** Инвентарь артефактов: список активных слотов и включение/выключение. */
+export function showArtifacts(view, { onToggle, onClose }) {
+  const o = overlay('artifacts-overlay');
+  o.classList.remove('hidden');
+  o.replaceChildren();
+  const box = el('div', 'panel colony-panel');
+  const head = el('div', 'colony-head');
+  const t = el('div');
+  t.appendChild(el('h2', 'panel-title', 'Артефакты'));
+  t.appendChild(el('div', 'panel-sub', `Активные слоты: ${view.used}/${view.slots} · плазма: ${view.plasma}`));
+  head.appendChild(t);
+  const close = el('button', 'ghost-btn', 'Закрыть');
+  close.type = 'button';
+  close.addEventListener('click', onClose);
+  head.appendChild(close);
+  box.appendChild(head);
+  const grid = el('div', 'colony-grid');
+  if (!view.items.length) {
+    grid.appendChild(el('div', 'empty-note', 'Нет артефактов.'));
+  }
+  for (const it of view.items) {
+    const b = el('button', `colony-card artifact${it.active ? ' selected' : ''}`);
+    b.type = 'button';
+    b.appendChild(
+      el('div', 'card-title',
+        `${it.name}${it.level > 0 ? ` · ур. ${it.level}/${it.maxLevel}` : ' · не получен'}`)
+    );
+    b.appendChild(el('div', 'card-line dim', it.desc));
+    b.appendChild(el('div', 'card-line', it.level > 0 ? (it.active ? 'Активен' : 'Выключен') : 'Можно купить в лавке'));
+    b.disabled = it.level === 0;
+    if (it.level > 0) {
+      b.addEventListener('click', () => onToggle(it.id, !it.active));
+    }
+    grid.appendChild(b);
+  }
+  box.appendChild(grid);
+  box.appendChild(
+    el('div', 'merge-reason',
+      view.used >= view.slots
+        ? 'Все слоты заняты — выключите артефакт, чтобы включить другой.'
+        : 'Нажмите на артефакт, чтобы включить или выключить его.'
+    )
+  );
+  o.appendChild(box);
+}
+
+export function hideArtifacts() {
+  const o = document.getElementById('artifacts-overlay');
+  if (o) {
+    o.classList.add('hidden');
+    o.replaceChildren();
+  }
 }
