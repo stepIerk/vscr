@@ -1,0 +1,21 @@
+{
+  "name": "viscera-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Top-down 2D roguelike prototype: microbot inside organism (Phaser 4 + Vite, no external assets).",
+  "license": "ISC",
+  "author": "sykorn",
+  "type": "module",
+  "main": "vite.config.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "phaser": "^4.2.1"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5"
+  }
+}
