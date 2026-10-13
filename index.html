@@ -2,58 +2,93 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
+    />
+    <meta name="theme-color" content="#04070d" />
     <title>VISCERA — microbot prototype</title>
   </head>
   <body>
     <div id="app">
       <div id="game-container"></div>
 
-      <div id="hud" class="hud">
-        <div class="hud-row">
-          <span class="hud-label">ЗДР</span>
-          <div class="hp-track">
-            <div id="hp-fill" class="hp-fill"></div>
+      <!-- SYS-окно: витальные показания -->
+      <div id="hud" class="hud win">
+        <div class="win-bar">
+          <span class="win-dot"></span>
+          <span class="win-title">SYS · VISCERA</span>
+        </div>
+        <div class="win-body">
+          <div class="hud-row">
+            <span class="hud-label">ЗДР</span>
+            <div class="hp-track">
+              <div id="hp-fill" class="hp-fill"></div>
+            </div>
+            <span id="hp-text" class="hud-value">100</span>
           </div>
-          <span id="hp-text" class="hud-value">100</span>
-        </div>
-        <div class="hud-row">
-          <span class="hud-label">Фраги</span>
-          <span id="kills-text" class="hud-value">0</span>
-        </div>
-        <div class="hud-row">
-          <span class="hud-label">Биомасса</span>
-          <span id="motes-text" class="hud-value mote">0</span>
-        </div>
-        <div class="hud-row">
-          <span class="hud-label">Плазма</span>
-          <span id="plasma-text" class="hud-value plasma">0</span>
-        </div>
-        <div class="hud-row">
-          <span class="hud-label">Уровень</span>
-          <span id="level-text" class="hud-value">1</span>
-          <div class="xp-track">
-            <div id="xp-fill" class="xp-fill"></div>
+          <div class="hud-row">
+            <span class="hud-label">УР</span>
+            <span id="level-text" class="hud-value lvl">1</span>
+            <div class="xp-track">
+              <div id="xp-fill" class="xp-fill"></div>
+            </div>
+            <span id="xp-text" class="hud-value xp">0/6</span>
           </div>
-          <span id="xp-text" class="hud-value xp">0/6</span>
+          <div class="hud-chips">
+            <span class="chip"><em>ФР</em><b id="kills-text">0</b></span>
+            <span class="chip chip-bio"><em>БИО</em><b id="motes-text">0</b></span>
+            <span class="chip chip-pla"><em>ПЛЗ</em><b id="plasma-text">0</b></span>
+          </div>
+          <div id="seed-text" class="hud-seed">seed —</div>
         </div>
-        <div class="hud-row hud-buttons">
-          <button id="colony-btn" type="button" class="hud-btn">Колония (0/5)</button>
-          <button id="artifacts-btn" type="button" class="hud-btn">Артефакты (0/5)</button>
-        </div>
-        <div id="hud-hint" class="hud-hint">WASD / стрелки — движение · атака сама · E — купить у стенда</div>
-        <div id="seed-text" class="hud-seed">seed —</div>
       </div>
 
-      <div id="colony-side" class="colony-side hidden"></div>
-
-      <div id="touch-ui" class="touch-ui hidden">
-        <div id="joy" class="joy"><div id="joy-knob" class="joy-knob"></div></div>
-        <button id="act-btn" type="button" class="act-btn">E</button>
-      </div>
-
+      <!-- Миникарта -->
       <div id="minimap-wrap">
         <canvas id="minimap" width="220" height="220"></canvas>
+      </div>
+
+      <!-- Контекстное действие: живёт только когда оно нужно -->
+      <button id="action-btn" class="action-btn hidden" type="button">
+        <span class="act-key" id="act-key">E</span>
+        <span class="act-body">
+          <span class="act-label" id="act-label">КУПИТЬ</span>
+          <span class="act-sub" id="act-sub"></span>
+        </span>
+      </button>
+
+      <!-- Нижняя командная панель: колония, гекс-слоты, инвентарь -->
+      <div id="bottom-bar" class="bottom-bar win">
+        <div class="strip-head">
+          <span class="win-dot"></span>
+          <span class="strip-title">КЛЕТКИ</span>
+          <span id="colony-count" class="strip-count">0/5</span>
+          <span id="colony-note" class="strip-note hidden"></span>
+        </div>
+        <div id="colony-strip" class="colony-strip"></div>
+        <div class="bar-row">
+          <button id="colony-btn" type="button" class="bar-btn bar-main">
+            <span class="bar-ico">⬡</span>
+            <span class="bar-txt">
+              <b>КОЛОНИЯ</b>
+              <i>скрещивание · мутации</i>
+            </span>
+          </button>
+          <div id="bar-hint" class="bar-hint">WASD / стрелки — движение · атака сама · E — купить у стенда</div>
+          <button id="artifacts-btn" type="button" class="bar-btn bar-inv">
+            <span class="bar-ico">▦</span>
+            <span class="inv-count" id="inv-count">0/5</span>
+            <span class="bar-cap">ИНВ</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Джойстик: подсказка + плавающее кольцо, живёт только на тач-устройствах -->
+      <div id="touch-ui" class="touch-ui hidden">
+        <div id="joy-zone" class="joy-zone"></div>
+        <div id="joy-hint" class="joy-hint"></div>
+        <div id="joy" class="joy"><div id="joy-knob" class="joy-knob"></div></div>
       </div>
 
       <div id="boss-bar" class="boss-bar hidden">
@@ -66,11 +101,17 @@
       <div id="toast" class="toast hidden"></div>
 
       <div id="gameover" class="gameover hidden">
-        <div class="gameover-card">
-          <h1>ИГРА ОКОНЧЕНА</h1>
-          <p>Микробот уничтожен.</p>
-          <p class="gameover-stats">Фраги: <span id="final-kills">0</span> · Биомасса: <span id="final-motes">0</span></p>
-          <button id="restart-btn" type="button">Заново</button>
+        <div class="gameover-card win">
+          <div class="win-bar danger">
+            <span class="win-dot"></span>
+            <span class="win-title">SYS · OFFLINE</span>
+          </div>
+          <div class="win-body">
+            <h1>ИГРА ОКОНЧЕНА</h1>
+            <p>Микробот уничтожен.</p>
+            <p class="gameover-stats">Фраги: <span id="final-kills">0</span> · Биомасса: <span id="final-motes">0</span></p>
+            <button id="restart-btn" type="button">Заново</button>
+          </div>
         </div>
       </div>
     </div>

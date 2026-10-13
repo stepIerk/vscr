@@ -26,20 +26,22 @@ function imgEl(url, cls) {
   return el('div', `${cls} img-missing`);
 }
 
-function overlay(id) {
+function overlay(id, sheet = false) {
   let o = document.getElementById(id);
   if (!o) {
     o = el('div', 'overlay hidden');
     o.id = id;
     document.getElementById('app').appendChild(o);
   }
+  // Нижний лист: панель прижата к низу экрана — карточки под большим пальцем.
+  o.classList.toggle('sheet', sheet);
   return o;
 }
 
 // ------------------------------------------------------------------- draft
 
 export function showDraft({ level, cards, onPick }) {
-  const o = overlay('draft-overlay');
+  const o = overlay('draft-overlay', true);
   o.classList.remove('hidden');
   o.replaceChildren();
   const box = el('div', 'panel draft-panel');
@@ -72,7 +74,7 @@ export function hideDraft() {
 // ----------------------------------------------------------------- targets
 
 export function showTargets({ title, options, onSelect }) {
-  const o = overlay('target-overlay');
+  const o = overlay('target-overlay', true);
   o.classList.remove('hidden');
   o.replaceChildren();
   const box = el('div', 'panel target-panel');

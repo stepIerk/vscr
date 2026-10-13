@@ -102,6 +102,24 @@ function makeCircleTexture(scene, key, size, draw) {
   g.destroy();
 }
 
+/** Вершины правильного многоугольника (по умолчанию — «остриё вверх»). */
+function polyN(cx, cy, r, n, rot = -Math.PI / 2) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = rot + (i / n) * Math.PI * 2;
+    pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+  }
+  return pts;
+}
+
+/** Затемнение/осветление hex-цвета (для слоёв плоти врагов и боссов). */
+function shade(color, f) {
+  const r = Math.min(255, (((color >> 16) & 255) * f) | 0);
+  const g = Math.min(255, (((color >> 8) & 255) * f) | 0);
+  const b = Math.min(255, ((color & 255) * f) | 0);
+  return (r << 16) | (g << 8) | b;
+}
+
 function ensureTextures(scene) {
   // Shared 8px soft dot for all particle emitters.
   makeCircleTexture(scene, TEX.dot, TEX_SIZE.dot, (g, s) => {
@@ -109,36 +127,67 @@ function ensureTextures(scene) {
     g.fillCircle(s / 2, s / 2, s / 2 - 1);
   });
 
-  // Player core: dark disc + yellow nucleus (kept bright vs. the red dungeon).
+  // Герой — микробот: угловатый корпус-гексагон, синяя панель, белая обводка.
   makeCircleTexture(scene, TEX.player, TEX_SIZE.player, (g, s) => {
     const c = s / 2;
-    g.fillStyle(0x0a1512, 1);
-    g.fillCircle(c, c, 15);
-    g.lineStyle(2, COLORS.playerShell, 0.9);
-    g.strokeCircle(c, c, 15);
-    g.fillStyle(COLORS.playerCore, 1);
-    g.fillCircle(c, c, 8);
-    g.fillStyle(0xffffff, 0.9);
-    g.fillCircle(c - 2.5, c - 2.5, 2.5);
+    // Слабое синее свечение силуэта.
+    g.fillStyle(COLORS.machineLine, 0.12);
+    g.fillCircle(c, c, 18);
+    // Корпус: тёмный сплав + белая обводка («свой» знак).
+    const hull = polyN(c, c, 14, 6);
+    g.fillStyle(COLORS.machineBody, 1);
+    g.fillPoints(hull, true);
+    g.lineStyle(2, COLORS.machineMark, 0.95);
+    g.strokePoints(hull, true);
+    // Внутренняя панель с синим контуром.
+    const panel = polyN(c, c, 9, 6);
+    g.fillStyle(COLORS.machinePanel, 1);
+    g.fillPoints(panel, true);
+    g.lineStyle(1.5, COLORS.machineLine, 0.95);
+    g.strokePoints(panel, true);
+    // Болты по трём вершинам корпуса.
+    g.fillStyle(COLORS.machineLine, 1);
+    for (const a of [-Math.PI / 2, Math.PI / 6, (Math.PI * 5) / 6]) {
+      g.fillCircle(c + Math.cos(a) * 11.5, c + Math.sin(a) * 11.5, 1.4);
+    }
+    // Боковые сопла.
+    g.lineStyle(2, COLORS.machineLine, 0.85);
+    g.lineBetween(c - 12.5, c, c - 16, c);
+    g.lineBetween(c + 12.5, c, c + 16, c);
+    // Антенна сверху (светодиод на конце) и вентиль снизу.
+    g.lineStyle(2, COLORS.machineLine, 0.9);
+    g.lineBetween(c, c - 10.5, c, c - 15.5);
+    g.fillStyle(COLORS.machineLine, 1);
+    g.fillCircle(c, c - 17, 1.6);
+    g.lineBetween(c, c + 10.5, c, c + 15.5);
+    // Ядро-светодиод.
+    g.fillStyle(COLORS.machineGlow, 1);
+    g.fillCircle(c, c, 4);
+    g.fillStyle(0xffffff, 0.95);
+    g.fillCircle(c - 1.4, c - 1.4, 1.5);
   });
 
-  // Thin glowing shell ring with 4 notches (rotates slowly in update).
+  // Кольцо-гироскоп: синие зубцы + один белый маркер оси (медленно вращается).
   makeCircleTexture(scene, TEX.shell, TEX_SIZE.shell, (g, s) => {
     const c = s / 2;
-    g.lineStyle(1.5, COLORS.playerShell, 0.85);
+    g.lineStyle(1.5, COLORS.machineLine, 0.7);
     g.strokeCircle(c, c, 24);
-    g.lineStyle(2, COLORS.playerShell, 0.9);
+    g.lineStyle(1, COLORS.machineLine, 0.3);
+    g.strokeCircle(c, c, 21);
+    g.lineStyle(2.5, COLORS.machineLine, 0.95);
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2;
-      const x1 = c + Math.cos(a) * 24;
-      const y1 = c + Math.sin(a) * 24;
-      const x2 = c + Math.cos(a) * 27;
-      const y2 = c + Math.sin(a) * 27;
-      g.lineBetween(x1, y1, x2, y2);
+      g.lineBetween(c + Math.cos(a) * 23, c + Math.sin(a) * 23,
+        c + Math.cos(a) * 27, c + Math.sin(a) * 27);
     }
+    // Один белый зубец — на нём читается вращение.
+    const a0 = -Math.PI / 2;
+    g.lineStyle(2.5, COLORS.machineMark, 0.95);
+    g.lineBetween(c + Math.cos(a0) * 22.5, c + Math.sin(a0) * 22.5,
+      c + Math.cos(a0) * 27.5, c + Math.sin(a0) * 27.5);
   });
 
-  // Bullet: yellow-hot core.
+  // Выстрел микробота: синее ядро (тот же язык, что у корпуса).
   makeCircleTexture(scene, TEX.bullet, TEX_SIZE.bullet, (g, s) => {
     const c = s / 2;
     g.fillStyle(COLORS.bullet, 0.35);
@@ -276,55 +325,113 @@ function ensureTextures(scene) {
     g.destroy();
   }
 
-  // Enemy A: triangle (fast, fragile).
+  // ------------------------------------------------ враги: язык ткани
+  // Тёплое тело + тёмно-бордовая обводка + жгутики. Белого нет: белый = «свой».
+
+  // Enemy A: жгутиковый дротик (быстрый, хрупкий).
   if (!scene.textures.exists(TEX['enemy-a'])) {
     const s = TEX_SIZE['enemy-a'];
     const g = scene.add.graphics();
+    const c = s / 2;
+    // Тело-капля остриём вверх.
+    const body = [
+      { x: c, y: 2 },
+      { x: c + 8, y: c + 2 },
+      { x: c + 6, y: s - 6 },
+      { x: c - 6, y: s - 6 },
+      { x: c - 8, y: c + 2 }
+    ];
     g.fillStyle(COLORS.enemyA, 1);
-    g.fillTriangle(s / 2, 3, s - 3, s - 4, 3, s - 4);
-    g.lineStyle(1.5, 0xffffff, 0.55);
-    g.strokeTriangle(s / 2, 3, s - 3, s - 4, 3, s - 4);
+    g.fillPoints(body, true);
+    g.lineStyle(2.5, COLORS.tissueDark, 1);
+    g.strokePoints(body, true);
+    // Три жгутика сзади.
+    g.lineStyle(2, COLORS.enemyA, 0.85);
+    g.lineBetween(c - 4, s - 6, c - 6.5, s - 0.5);
+    g.lineBetween(c, s - 6, c, s);
+    g.lineBetween(c + 4, s - 6, c + 6.5, s - 0.5);
+    // Ядро + влажный блик мембраны.
+    g.fillStyle(COLORS.tissueDeep, 1);
+    g.fillCircle(c, c + 1, 4.5);
+    g.fillStyle(0xff9aa4, 1);
+    g.fillCircle(c, c + 1, 1.8);
+    g.fillStyle(COLORS.tissueWet, 0.5);
+    g.fillCircle(c - 3, c - 4, 3);
     g.generateTexture(TEX['enemy-a'], s, s);
     g.destroy();
   }
 
-  // Enemy B: square (balanced).
+  // Enemy B: жгутиковый узел (средний).
   if (!scene.textures.exists(TEX['enemy-b'])) {
     const s = TEX_SIZE['enemy-b'];
     const g = scene.add.graphics();
-    const m = 5;
+    const c = s / 2;
+    // Неровный «мешок»: разные радиусы → живая асимметрия.
+    const radii = [12.5, 11, 13, 11.5, 12.5, 11, 12, 11.5];
+    const pts = [];
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 - Math.PI / 2 + 0.2;
+      pts.push({ x: c + Math.cos(a) * radii[i], y: c + Math.sin(a) * radii[i] });
+    }
     g.fillStyle(COLORS.enemyB, 1);
-    g.fillRect(m, m, s - m * 2, s - m * 2);
-    g.lineStyle(1.5, 0xffffff, 0.5);
-    g.strokeRect(m, m, s - m * 2, s - m * 2);
-    g.fillStyle(0x3d0d08, 1);
-    g.fillCircle(s / 2, s / 2, 5);
+    g.fillPoints(pts, true);
+    g.lineStyle(2.5, COLORS.tissueDark, 1);
+    g.strokePoints(pts, true);
+    // Жгутики по кругу.
+    g.lineStyle(2, COLORS.enemyB, 0.8);
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + 0.5;
+      g.lineBetween(c + Math.cos(a) * 11, c + Math.sin(a) * 11,
+        c + Math.cos(a) * 16.5, c + Math.sin(a) * 16.5);
+    }
+    // Ядро, вакуоль и влажный блик.
+    g.fillStyle(COLORS.tissueDeep, 1);
+    g.fillCircle(c + 1, c + 1, 6);
+    g.fillStyle(0xffc9a0, 0.85);
+    g.fillCircle(c - 4, c - 3, 2.5);
+    g.fillStyle(COLORS.tissueWet, 0.45);
+    g.fillCircle(c - 5, c - 5, 3.5);
     g.generateTexture(TEX['enemy-b'], s, s);
     g.destroy();
   }
 
-  // Enemy C: pentagon (tank).
+  // Enemy C: бронированный узел (тяжёлый).
   if (!scene.textures.exists(TEX['enemy-c'])) {
     const s = TEX_SIZE['enemy-c'];
     const g = scene.add.graphics();
     const c = s / 2;
-    const r = s / 2 - 3;
-    const pts = [];
-    for (let i = 0; i < 5; i++) {
-      const a = -Math.PI / 2 + (i / 5) * Math.PI * 2;
-      pts.push({ x: c + Math.cos(a) * r, y: c + Math.sin(a) * r });
+    const r = s / 2 - 6;
+    // Шипы по вершинам (под телом, торчат наружу).
+    g.lineStyle(3, COLORS.tissueDark, 1);
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + (i / 6) * Math.PI * 2;
+      g.lineBetween(c + Math.cos(a) * (r - 1), c + Math.sin(a) * (r - 1),
+        c + Math.cos(a) * (r + 5), c + Math.sin(a) * (r + 5));
     }
+    // Тело: шестигранник с толстой боровой обводкой.
+    const hull = polyN(c, c, r, 6);
     g.fillStyle(COLORS.enemyC, 1);
-    g.fillPoints(pts, true);
-    g.lineStyle(2, 0xffffff, 0.5);
-    g.strokePoints(pts, true);
-    g.fillStyle(0x2b060d, 1);
+    g.fillPoints(hull, true);
+    g.lineStyle(3, COLORS.tissueDark, 1);
+    g.strokePoints(hull, true);
+    // Внутренняя мембрана.
+    g.lineStyle(2, 0x8a1f2e, 0.9);
+    g.strokeCircle(c, c, r - 5);
+    // Ядро с вертикальным зрачком (глаз, а не значок).
+    g.fillStyle(COLORS.tissueDeep, 1);
     g.fillCircle(c, c, 7);
+    g.fillStyle(0xff9aa4, 1);
+    g.fillCircle(c, c, 4.5);
+    g.fillStyle(COLORS.tissueDark, 1);
+    g.fillRect(c - 1, c - 3.5, 2, 7);
+    // Влажный блик мембраны.
+    g.fillStyle(COLORS.tissueWet, 0.4);
+    g.fillCircle(c - 6, c - 8, 4);
     g.generateTexture(TEX['enemy-c'], s, s);
     g.destroy();
   }
 
-  // Bosses: big fleshy maws in def tints (looks are placeholder — separate pass).
+  // Боссы: мясистая утроба с зубцами (maw) и костяной «хор» с ресничным венцом.
   BOSS.defs.forEach((def, i) => {
     const key = TEX[`boss-${i}`];
     if (!key || scene.textures.exists(key)) return;
@@ -332,25 +439,77 @@ function ensureTextures(scene) {
     const g = scene.add.graphics();
     const c = s / 2;
     const R = s / 2 - 4;
-    g.fillStyle(def.tint, 0.3);
+    const isMaw = def.key === 'maw';
+    // Гало плоти.
+    g.fillStyle(def.tint, 0.16);
     g.fillCircle(c, c, R);
+    // Тело слоями: темнеет к центру.
+    g.fillStyle(shade(def.tint, 0.5), 1);
+    g.fillCircle(c, c, R - 2);
     g.fillStyle(def.tint, 1);
     g.fillCircle(c, c, R - 8);
-    g.fillStyle(0x1a080c, 1);
-    g.fillCircle(c, c, R - 20);
-    g.fillStyle(0x000000, 1);
-    g.fillCircle(c, c, R - 30);
-    g.fillStyle(0xffffff, 1);
-    g.fillCircle(c - 6, c - 8, 5);
-    g.lineStyle(3, 0xffffff, 0.7);
-    g.strokeCircle(c, c, R - 8);
-    // Spikes around the maw so it reads as boss, not enemy-c.
-    g.lineStyle(4, def.tint, 1);
-    for (let k = 0; k < 8; k++) {
-      const a = (k / 8) * Math.PI * 2 + 0.2;
-      g.lineBetween(c + Math.cos(a) * (R - 4), c + Math.sin(a) * (R - 4),
-        c + Math.cos(a) * R, c + Math.sin(a) * R);
+    g.fillStyle(shade(def.tint, 0.65), 1);
+    g.fillCircle(c, c, R - 14);
+    // Зев.
+    g.fillStyle(COLORS.tissueDark, 1);
+    g.fillCircle(c, c, R - 18);
+    g.fillStyle(COLORS.holeDeep, 1);
+    g.fillCircle(c, c, R - 24);
+    // Зубцы по кромке зева.
+    const teeth = isMaw ? 12 : 10;
+    const inner = isMaw ? R - 19 : R - 25;
+    const outer = isMaw ? R - 12 : R - 18;
+    const w = (Math.PI * 2) / teeth / 2.6;
+    for (let k = 0; k < teeth; k++) {
+      const a = (k / teeth) * Math.PI * 2 + 0.1;
+      g.fillStyle(0xf0e2d0, 0.92);
+      g.fillPoints([
+        { x: c + Math.cos(a - w) * outer, y: c + Math.sin(a - w) * outer },
+        { x: c + Math.cos(a + w) * outer, y: c + Math.sin(a + w) * outer },
+        { x: c + Math.cos(a) * inner, y: c + Math.sin(a) * inner }
+      ], true);
     }
+    // Вены по телу (под зубцами и ртами).
+    g.lineStyle(2, COLORS.tissueDark, 0.5);
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2 + 0.35;
+      g.lineBetween(c + Math.cos(a) * (R - 16), c + Math.sin(a) * (R - 16),
+        c + Math.cos(a) * (R - 3), c + Math.sin(a) * (R - 3));
+    }
+    // «Хор»: венец малых ртов по мясистому кольцу.
+    if (!isMaw) {
+      const lobes = 8;
+      for (let k = 0; k < lobes; k++) {
+        const a = (k / lobes) * Math.PI * 2;
+        const lx = c + Math.cos(a) * (R - 9);
+        const ly = c + Math.sin(a) * (R - 9);
+        g.fillStyle(shade(def.tint, 0.9), 1);
+        g.fillCircle(lx, ly, 6);
+        g.lineStyle(1.5, COLORS.tissueDark, 0.9);
+        g.strokeCircle(lx, ly, 6);
+        g.fillStyle(COLORS.tissueDark, 1);
+        g.fillCircle(lx, ly, 2.6);
+      }
+    }
+    // Шипы по внешнему краю.
+    g.lineStyle(4, shade(def.tint, 0.8), 1);
+    for (let k = 0; k < 10; k++) {
+      const a = (k / 10) * Math.PI * 2 + 0.15;
+      g.lineBetween(c + Math.cos(a) * (R - 3), c + Math.sin(a) * (R - 3),
+        c + Math.cos(a) * (R + 1), c + Math.sin(a) * (R + 1));
+    }
+    // «Хор»: дополнительный венец ресничек.
+    if (!isMaw) {
+      g.lineStyle(2, shade(def.tint, 0.9), 0.85);
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2;
+        g.lineBetween(c + Math.cos(a) * (R + 1), c + Math.sin(a) * (R + 1),
+          c + Math.cos(a) * (R + 4.5), c + Math.sin(a) * (R + 4.5));
+      }
+    }
+    // Влажный блик.
+    g.fillStyle(COLORS.tissueWet, 0.22);
+    g.fillCircle(c - R * 0.35, c - R * 0.4, R * 0.26);
     g.generateTexture(key, s, s);
     g.destroy();
   });
@@ -381,90 +540,136 @@ function ensureTextures(scene) {
   }
 }
 
+/**
+ * Клетки колонии — мини-микроботы той же машинной семьи, что и герой:
+ * тёмный корпус + акцент роли + белая обводка (белый = «свой», у врагов его нет).
+ * Уровни слияния: lv2 — панели/болты, lv3 — гало и яркое ядро.
+ */
 function drawAllyCell(g, s, type, lv) {
   const c = s / 2;
+  const BODY = COLORS.machineBody;
+  const MARK = COLORS.machineMark;
+
   if (type === 'hunter') {
-    g.fillStyle(ALLY_TYPES.hunter.tint, 1); // cyan dart
-    g.fillTriangle(s / 2, 2, s - 2, s - 2, 2, s - 2);
-    g.lineStyle(1.5, 0xffffff, 0.6);
-    g.strokeTriangle(s / 2, 2, s - 3, s - 3, 3, s - 3);
-    g.fillStyle(0x06232b, 1);
-    g.fillCircle(s / 2, s / 2 + 4, 4);
+    const accent = ALLY_TYPES.hunter.tint;
+    // Дротик-охотник: остриё вверх, сведённые крылья.
+    const hull = [
+      { x: c, y: 2 },
+      { x: c + 9, y: s - 3 },
+      { x: c, y: s - 8 },
+      { x: c - 9, y: s - 3 }
+    ];
+    g.fillStyle(BODY, 1);
+    g.fillPoints(hull, true);
+    // Акцентная панель-кокпит.
+    g.fillStyle(accent, 0.9);
+    g.fillPoints([
+      { x: c, y: 5.5 },
+      { x: c + 5, y: s - 6.5 },
+      { x: c, y: s - 10 },
+      { x: c - 5, y: s - 6.5 }
+    ], true);
+    g.lineStyle(2, MARK, 1);
+    g.strokePoints(hull, true);
+    // Двигательные пазы сзади.
+    g.lineStyle(1.5, MARK, 0.75);
+    g.lineBetween(c - 5, s - 4, c - 7, s - 1);
+    g.lineBetween(c + 5, s - 4, c + 7, s - 1);
+    // Ядро-индикатор.
+    g.fillStyle(COLORS.machineGlow, lv >= 3 ? 1 : 0.95);
+    g.fillCircle(c, c + 1, lv >= 3 ? 2.6 : 2);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(c, c + 1, lv >= 2 ? 1.1 : 0.8);
     if (lv >= 2) {
-      // Боковые зазубрины + внутреннее ядро.
-      g.lineStyle(2, 0xffffff, 0.75);
-      g.lineBetween(6, s - 8, 11, s - 6);
-      g.lineBetween(s - 6, s - 8, s - 11, s - 6);
-      g.fillStyle(0xffffff, 0.9);
-      g.fillCircle(s / 2, s / 2 + 4, 2);
+      // Внутренний контур + болты в крыльях.
+      g.lineStyle(1, MARK, 0.4);
+      g.strokePoints([
+        { x: c, y: 4.5 },
+        { x: c + 7, y: s - 4 },
+        { x: c, y: s - 9 },
+        { x: c - 7, y: s - 4 }
+      ], true);
+      g.fillStyle(MARK, 0.9);
+      g.fillCircle(c - 6.5, s - 4.5, 1.2);
+      g.fillCircle(c + 6.5, s - 4.5, 1.2);
     }
     if (lv >= 3) {
-      // Пунктирное кольцо + яркое ядро.
-      g.fillStyle(0xffffff, 0.9);
-      for (let k = 0; k < 8; k++) {
-        const a = (k / 8) * Math.PI * 2;
-        g.fillCircle(c + Math.cos(a) * (c - 2), c + Math.sin(a) * (c - 2), 1.4);
-      }
-      g.fillStyle(0x06232b, 1);
-      g.fillCircle(s / 2, s / 2 + 4, 5);
-      g.fillStyle(0x9df3ff, 1);
-      g.fillCircle(s / 2, s / 2 + 4, 2.5);
+      // Гало-кольцо акцента вокруг дротика.
+      g.lineStyle(1.5, accent, 0.45);
+      g.strokeCircle(c, c, c - 1.5);
     }
   } else if (type === 'defender') {
+    const accent = ALLY_TYPES.defender.tint;
     const r = s / 2 - 2;
-    const pts = [];
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
-      pts.push({ x: c + Math.cos(a) * r, y: c + Math.sin(a) * r });
-    }
-    g.fillStyle(ALLY_TYPES.defender.tint, 1); // bulky teal hexagon
-    g.fillPoints(pts, true);
-    g.lineStyle(2, 0xffffff, 0.55);
-    g.strokePoints(pts, true);
-    g.lineStyle(2, 0x06231c, 0.9);
-    g.strokeCircle(c, c, r * 0.55);
+    const hull = polyN(c, c, r, 6);
+    g.fillStyle(BODY, 1);
+    g.fillPoints(hull, true);
+    // Панель-щит акцентного цвета.
+    const plate = polyN(c, c, r * 0.72, 6);
+    g.fillStyle(accent, 0.85);
+    g.fillPoints(plate, true);
+    // Швы панели.
+    g.lineStyle(1.5, BODY, 0.7);
+    g.lineBetween(c - r * 0.55, c, c + r * 0.55, c);
+    g.lineBetween(c - r * 0.28, c - r * 0.48, c + r * 0.28, c - r * 0.48);
+    g.lineBetween(c - r * 0.28, c + r * 0.48, c + r * 0.28, c + r * 0.48);
+    g.lineStyle(2.5, MARK, 1);
+    g.strokePoints(hull, true);
+    // Ядро-индикатор.
+    g.fillStyle(COLORS.machineGlow, 1);
+    g.fillCircle(c, c, lv >= 3 ? 4 : 3.2);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(c, c, lv >= 2 ? 1.6 : 1.2);
     if (lv >= 2) {
-      // Точки по углам + второе кольцо.
-      g.fillStyle(0xffffff, 0.85);
-      for (const p of pts) g.fillCircle(p.x, p.y, 1.8);
-      g.lineStyle(1.5, 0x06231c, 0.9);
-      g.strokeCircle(c, c, r * 0.8);
+      // Болты по шести вершинам.
+      g.fillStyle(MARK, 0.95);
+      for (const p of hull) g.fillCircle(p.x, p.y, 1.6);
+      g.lineStyle(1.5, MARK, 0.5);
+      g.strokePoints(polyN(c, c, r * 0.88, 6), true);
     }
     if (lv >= 3) {
-      // Наружное кольцо + светящееся ядро.
-      g.lineStyle(2, 0xffffff, 0.8);
-      g.strokeCircle(c, c, r + 0.5 > s / 2 - 0.5 ? s / 2 - 0.5 : r + 0.5);
-      g.fillStyle(0x06231c, 1);
-      g.fillCircle(c, c, 5);
-      g.fillStyle(0xb8ffd9, 1);
-      g.fillCircle(c, c, 2.4);
+      // Внешнее гало.
+      g.lineStyle(1.5, accent, 0.45);
+      g.strokeCircle(c, c, r + 1.5);
     }
   } else {
-    g.fillStyle(ALLY_TYPES.parasite.tint, 1); // small lime node with tail
-    g.fillCircle(c, c - 2, 7);
-    g.lineStyle(2, ALLY_TYPES.parasite.tint, 0.9);
-    g.lineBetween(c - 4, c + 4, c - 7, c + 10);
-    g.lineBetween(c + 4, c + 4, c + 7, c + 10);
-    g.fillStyle(0xffffff, 1);
-    g.fillCircle(c, c - 2, 2.2);
+    const accent = ALLY_TYPES.parasite.tint;
+    // Манипуляторы (под телом капсулы).
+    g.lineStyle(2, MARK, 0.85);
+    for (const a of [Math.PI / 2, (Math.PI * 7) / 6, (Math.PI * 11) / 6]) {
+      g.lineBetween(c + Math.cos(a) * 6, c + Math.sin(a) * 6,
+        c + Math.cos(a) * 11, c + Math.sin(a) * 11);
+    }
+    // Капсула.
+    g.fillStyle(BODY, 1);
+    g.fillCircle(c, c, 8);
+    g.lineStyle(2, MARK, 1);
+    g.strokeCircle(c, c, 8);
+    // Акцентное кольцо и присоска.
+    g.lineStyle(lv >= 2 ? 2.5 : 2, accent, 1);
+    g.strokeCircle(c, c, 5.5);
+    g.fillStyle(0x04090e, 1);
+    g.fillCircle(c, c, 3);
+    g.fillStyle(COLORS.machineGlow, 1);
+    g.fillCircle(c, c, lv >= 3 ? 1.8 : 1.4);
     if (lv >= 2) {
-      // Кольцо вокруг узла + третий хвост.
-      g.lineStyle(1.5, 0xffffff, 0.7);
-      g.strokeCircle(c, c - 2, 9.5);
-      g.lineStyle(2, ALLY_TYPES.parasite.tint, 0.9);
-      g.lineBetween(c, c + 5, c, c + 11);
+      // Акцентные «подошвы» на концах манипуляторов.
+      g.fillStyle(accent, 1);
+      for (const a of [Math.PI / 2, (Math.PI * 7) / 6, (Math.PI * 11) / 6]) {
+        g.fillCircle(c + Math.cos(a) * 11, c + Math.sin(a) * 11, 1.5);
+      }
     }
     if (lv >= 3) {
-      // Корона из узелков + яркое ядро.
-      g.fillStyle(0xffffff, 0.9);
+      // Корона из точек + второй белый контур.
+      g.fillStyle(accent, 0.9);
       for (let k = 0; k < 6; k++) {
         const a = -Math.PI / 2 + (k / 6) * Math.PI * 2;
-        g.fillCircle(c + Math.cos(a) * 10.5, c - 2 + Math.sin(a) * 10.5, 1.6);
+        g.fillCircle(c + Math.cos(a) * 10.5, c + Math.sin(a) * 10.5, 1.3);
       }
-      g.fillStyle(0x33470a, 1);
-      g.fillCircle(c, c - 2, 4.5);
-      g.fillStyle(0xeaffb0, 1);
-      g.fillCircle(c, c - 2, 2);
+      g.lineStyle(1, MARK, 0.5);
+      g.strokeCircle(c, c, 9.5);
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(c, c, 1);
     }
   }
 }
@@ -662,15 +867,29 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 0.09, 0.09);
     this.cameras.main.setBackgroundColor('#0a0507');
 
-    // --- Touch: subtle stick + action key; map focus lifts above the stick ---
+    // --- Touch: floating stick; focus lifts above the command bar ---
     if (isTouchDevice()) {
       initTouch({
-        onMove: (x, y) => { this.joyVec.x = x; this.joyVec.y = y; },
-        onAction: () => this.tryBuyNearStand()
+        onMove: (x, y) => { this.joyVec.x = x; this.joyVec.y = y; }
       });
-      // Фокус камеры ниже героя → герой выше центра, джойстик не кроет бой.
-      this.cameras.main.setFollowOffset(0, TOUCH.followOffsetY);
     }
+    // Герой держится в центре зоны над нижней панелью — бой не прячется
+    // под панелью и не уезжает под палец со стиком (сдвиг отрицательный:
+    // followOffset вычитается из точки, за которой следит камера).
+    // Высота панели меряется по-настоящему (safe-area и медиазапросы меняют
+    // её), поэтому раз в секунду подтягиваем — сцена убьёт таймер сама.
+    const applyLift = () => {
+      const barEl = document.getElementById('bottom-bar');
+      const barH = barEl ? barEl.offsetHeight : 0;
+      const lift = barH > 0
+        ? -Math.round(barH / 2) - (isTouchDevice() ? 34 : 0)
+        : TOUCH.followOffsetY;
+      if (!this.cameras.main.followOffset || this.cameras.main.followOffset.y !== lift) {
+        this.cameras.main.setFollowOffset(0, lift);
+      }
+    };
+    applyLift();
+    this.time.addEvent({ delay: 1000, loop: true, callback: applyLift });
 
     // --- Input (created once per scene run; auto-cleaned on shutdown) ---
     this.cursors = this.input.keyboard ? this.input.keyboard.createCursorKeys() : null;
@@ -712,7 +931,7 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.allies, this.foeShots, this.onFoeShotAlly, null, this);
     this.fireAcc = this.heroStats().intervalMs; // first shot ready immediately
     this.spawnAllPortals();
-    this.refreshColonySide();
+    this.refreshColonyStrip();
   }
 
   // ----------------------------------------------------------------- update
@@ -754,7 +973,7 @@ export class GameScene extends Phaser.Scene {
     this.sideAcc = (this.sideAcc || 0) + dt;
     if (this.sideAcc >= 800) {
       this.sideAcc = 0;
-      if (!this.modalOpen) this.refreshColonySide();
+      if (!this.modalOpen) this.refreshColonyStrip();
     }
     this.pushHud();
   }
@@ -1456,6 +1675,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (!near) {
       if (this.standPrompt) { this.standPrompt.destroy(); this.standPrompt = null; }
+      ui.hideAction();
       return;
     }
     const offer = { kind: near.kind, key: near.key };
@@ -1470,6 +1690,13 @@ export class GameScene extends Phaser.Scene {
       this.standPrompt.setText(txt);
       this.standPrompt.setPosition(near.base.x, near.base.y - 62);
     }
+    // Контекстная кнопка живёт ровно столько, сколько рядом есть стенд.
+    ui.showAction({
+      key: 'E',
+      label: 'КУПИТЬ',
+      sub: `${near.price} плазмы`,
+      ok: this.run.plasma >= near.price
+    });
   }
 
   offerName(o) {
@@ -1546,6 +1773,7 @@ export class GameScene extends Phaser.Scene {
   openArtifacts() {
     if (this.modalOpen || this.isGameOver) return;
     this.modalOpen = true;
+    ui.hideAction();
     this.renderArtifacts();
     setTimeout(() => {
       if (!this.isGameOver && this.modalOpen) this.scene.pause();
@@ -1704,7 +1932,7 @@ export class GameScene extends Phaser.Scene {
     this.stashedCells = this.run.cells.splice(0);
     for (const cell of this.stashedCells) this.destroyAllyView(cell.id);
     ui.setColonyCount(this.run.cells.length, this.run.maxCells);
-    this.refreshColonySide();
+    this.refreshColonyStrip();
   }
 
   /** Колония возвращается после победы (добитые в бою клетки не воскресают). */
@@ -1718,7 +1946,7 @@ export class GameScene extends Phaser.Scene {
       this.spawnAllyView(cell);
     }
     ui.setColonyCount(this.run.cells.length, this.run.maxCells);
-    this.refreshColonySide();
+    this.refreshColonyStrip();
   }
 
   /** Босс крыла в центре зала: гоняется и бьёт вближнюю как обычный враг. */
@@ -2308,7 +2536,7 @@ export class GameScene extends Phaser.Scene {
     if (!cell) return;
     this.spawnAllyView(cell);
     ui.setColonyCount(this.run.cells.length, this.run.maxCells);
-    this.refreshColonySide();
+    this.refreshColonyStrip();
     ui.toast(`Клетка «${ALLY_TYPES[type].name}» вылупилась из нароста!`);
     this.pushHud();
   }
@@ -2681,6 +2909,7 @@ export class GameScene extends Phaser.Scene {
   openDraft() {
     if (this.modalOpen || this.isGameOver || this.pendingLevels <= 0) return;
     this.modalOpen = true;
+    ui.hideAction();
     this.draftCards = this.run.draftOptions().map((c) => describeCard(c, this.run));
     panels.showDraft({
       level: this.run.level,
@@ -2737,7 +2966,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.dirtyHero();
     this.pendingLevels -= 1;
-    this.refreshColonySide();
+    this.refreshColonyStrip();
     this.pushHud();
     if (this.pendingLevels > 0 && !this.isGameOver) {
       // Chain: next level's draft while staying paused.
@@ -2758,6 +2987,7 @@ export class GameScene extends Phaser.Scene {
   openColony() {
     if (this.modalOpen || this.isGameOver) return;
     this.modalOpen = true;
+    ui.hideAction();
     this.renderColony();
     setTimeout(() => {
       if (!this.isGameOver && this.modalOpen) this.scene.pause();
@@ -2790,12 +3020,13 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
-  /** Сайд-панель активных клеток: герой + колония, картинки и мутации. */
-  refreshColonySide() {
-    ui.renderColonySide(
+  /** Гекс-лента колонии внизу: картинки, бейдж уровня, полоски здоровья. */
+  refreshColonyStrip() {
+    ui.renderColonyStrip(
       {
         hero: { level: this.run.level, xp: this.run.xp, req: this.run.requiredXp(), hp: this.hp, maxHp: this.heroStats().maxHealth },
         stashed: this.stashedCells.length,
+        maxCells: this.run.maxCells,
         cells: this.run.cells.map((c) => {
           const st = this.run.computeCell(c);
           return {
@@ -2820,7 +3051,7 @@ export class GameScene extends Phaser.Scene {
     this.dirtyHero();
     ui.setColonyCount(this.run.cells.length, this.run.maxCells);
     this.renderColony();
-    this.refreshColonySide();
+    this.refreshColonyStrip();
     this.pushHud();
     return true;
   }
@@ -2947,7 +3178,7 @@ export class GameScene extends Phaser.Scene {
     v.badge.setVisible(cell.merge > 1);
     v.sprite.setTexture(allyTexKey(cell.type, cell.merge)); // вид растёт с уровнем
     v.sprite.setScale(1 + 0.12 * (cell.merge - 1));
-    this.refreshColonySide();
+    this.refreshColonyStrip();
   }
 
   damageCell(cell, dmg) {
@@ -2973,7 +3204,7 @@ export class GameScene extends Phaser.Scene {
     this.run.removeCell(cell.id); // frees one colony slot
     ui.setColonyCount(this.run.cells.length, this.run.maxCells);
     if (panels.isColonyOpen()) this.renderColony();
-    this.refreshColonySide();
+    this.refreshColonyStrip();
   }
 
   /** Nearest live enemy within aggro, or null. */
@@ -3175,6 +3406,7 @@ export class GameScene extends Phaser.Scene {
     this.isGameOver = true;
     this.hp = 0;
     ui.hideBoss();
+    ui.hideAction();
     panels.hideAll();
     this.modalOpen = false;
     this.pendingLevels = 0;

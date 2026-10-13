@@ -26,16 +26,28 @@ export const COLORS = {
   mottle: 0x170a0d, // darker floor mottling
   telegraph: 0xff2d40, // enemy spawn warning — clearly visible red
   mote: 0x9dffb0, // resource: pale glowing green, distinct on dark floor
-  // Returning cast (kept for contrast against the red environment).
-  playerCore: 0xffd94d,
-  playerShell: 0x40e0d0,
-  bullet: 0xffe86b,
-  enemyA: 0xff4d5e, // triangle — fast, fragile
-  enemyB: 0xff7a3d, // square — balanced
-  enemyC: 0xd63d5e, // pentagon — tank
-  sparkHit: 0xffd94d,
+  // ------------------------------------------------ «машинный» язык: герой и свои клетки
+  // Тёмный корпус + синяя подсветка панелей (тот же синий, что --accent в UI)
+  // и белая обводка — единственный знак «свой». Никаких тёплых цветов.
+  playerCore: 0x9fd8ff, // ядро-индикатор микробота
+  playerShell: 0x4da3ff, // панельный синий: корпус, кольцо-гироскоп
+  bullet: 0x8fd8ff, // выстрел микробота (синий, а не жёлтый)
+  machineBody: 0x0b1622, // корпус машин (тёмно-синий)
+  machinePanel: 0x0e1d2e, // внутренняя панель
+  machineLine: 0x4da3ff, // линии/болты/акценты панелей
+  machineGlow: 0x9fd8ff, // свечение ядра
+  machineMark: 0xffffff, // белая обводка = «свой»
+  // ------------------------------------------------ «язык ткани»: противники
+  // Тёплая плоть с тёмно-боровой обводкой. Белого нет — чтобы не спутать с союзниками.
+  tissueDark: 0x2b060d, // обводка и зевы врагов
+  tissueDeep: 0x4a0d14, // ядра/впадины плоти
+  tissueWet: 0xffb0b8, // влажный блик мембраны
+  enemyA: 0xff4d5e, // жгутиковый дротик — быстрый, хрупкий
+  enemyB: 0xff7a3d, // жгутиковый узел — средний
+  enemyC: 0xd63d5e, // бронированный узел — тяжёлый
+  sparkHit: 0xbfe6ff, // искры попадания микробота
   sparkDeath: 0xff4d5e,
-  sparkTrail: 0x40e0d0,
+  sparkTrail: 0x4da3ff,
   sparkMote: 0x9dffb0
 };
 
@@ -174,7 +186,7 @@ export const BOSS = {
       ]
     },
     {
-      key: 'choir', name: 'Хор', tint: 0x4dd2ff,
+      key: 'choir', name: 'Хор', tint: 0xe0c39a, // костяной янтарь: органика, не синь союзников
       hp: 110, speed: 62, damage: 20, radius: 38, contactCooldownMs: 1300,
       attacks: [
         { kind: 'spiral', label: 'Спираль', cooldownMs: 12000, telegraphMs: 1200, durationMs: 5000, tickMs: 130, step: 0.42, speed: 150, dmg: 10 },
@@ -314,9 +326,9 @@ export const GAME_VIEW = {
   zoom: 1
 };
 
-/** Мобильное управление: тихий стик + сдвиг фокуса камеры от него. */
+/** Мобильное управление: запасной сдвиг фокуса камеры, когда нижней панели нет. */
 export const TOUCH = {
-  followOffsetY: 90, // фокус ниже героя: герой выше центра, бой не под стиком
+  followOffsetY: -96 // отрицательный: герой выше центра, бой не под панелью
 };
 
 /* ------------------------------------------------ progression (stage 1) */

@@ -32,6 +32,7 @@ const game = new Phaser.Game(config);
 
 // Exposed for headless smoke-tests and future debugging.
 window.__game = game;
+window.__ui = ui;
 
 // Restart + colony bound exactly once (UI module guards duplicates).
 ui.bind(() => {
@@ -45,6 +46,10 @@ ui.bindColony(() => {
 ui.bindArtifacts(() => {
   const scene = game.scene.getScene('Game');
   if (scene) scene.openArtifacts();
+});
+ui.bindAction(() => {
+  const scene = game.scene.getScene('Game');
+  if (scene) scene.tryBuyNearStand();
 });
 
 export default game;
