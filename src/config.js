@@ -44,6 +44,9 @@ export const DUNGEON = {
   tunnelWidth: 120,
   // Толщина стен.
   wall: 24,
+  // Режим карты: true — комнаты соединены тоннелями (классика),
+  // false — тоннелей нет, вместо них врата-порталы между комнатами.
+  withTunnels: false,
   // Сколько площадей комнаты даёт одну точку появления врага.
   spawnAreaPer: 70000,
   spawnMin: 3,
@@ -88,6 +91,39 @@ export const ENEMY_LEVEL = {
 /** Telegraphed room spawns use these; kept in sync with generator defaults. */
 export const SPAWNS = {
   retryMs: 800 // re-check deferred spawn points while the player stays in the room
+};
+
+/* ------------------------------------------------- арена: бой на закрытых дверях */
+
+/**
+ * Бой начинается, когда игрок зашёл в комнату: колония телепортируется
+ * внутрь, проходы закрываются барьерами, начинают появляться монстры.
+ * После зачистки барьеры открываются.
+ */
+export const ARENA = {
+  barrierColor: 0xff2d40, // красная плоть-барьер в дверном проёме
+  barrierAlpha: 0.85,
+};
+
+/* ------------------------------------------------- врата-порталы (режим без тоннелей) */
+
+/**
+ * Врата-порталы соединяют комнаты напрямую вместо тоннелей.
+ * - Каждый линк графа даёт ровно пару врат (туда-обратно),
+ *   обе стороны одного линка красятся в один цвет.
+ * - Врата в незачищенной боевой комнате заблокированы (сбежать нельзя).
+ */
+export const PORTAL = {
+  radius: 34, // радиус зоны срабатывания телепорта
+  bodyRadius: 20, // радиус видимого тела врат
+  exitOffset: 110, // отступ точки прибытия от центра врат (чтобы не триггерить обратно)
+  cooldownMs: 1200, // защита от пинг-понга между парой
+  clearance: 130, // отступ наростов/стендов/препятствий от врат
+  inset: 130, // отступ врат от стен комнаты
+  minSeparation: 170, // минимальная дистанция между вратами в одной комнате
+  // Цвета пар врат (по индексу линка) — обе стороны одного линка одинаковые.
+  pairColors: [0x40e0d0, 0xffd94d, 0xff7ada, 0x9dffb0, 0xb79cff, 0xffa35e, 0x7ad9ff, 0xff8f8f],
+  lockedColor: 0xff2d40, // заблокированные врата (бой не зачищен) красятся красным
 };
 
 export const RESOURCE = {
@@ -345,6 +381,24 @@ export function resolveSeed(paramName = 'seed') {
     /* non-browser context: fall through to random */
   }
   return (Math.random() * 0xffffffff) >>> 0;
+}
+
+/**
+ * Map mode override via URL: `?tunnels=0|false` → portal mode (no tunnels),
+ * `?tunnels=1|true` → classic tunnels. Falls back to `DUNGEON.withTunnels`
+ * when the param is absent/invalid. Handy for A/B-testing both layouts.
+ */
+export function resolveWithTunnels(fallback, paramName = 'tunnels') {
+  try {
+    const raw = new URLSearchParams(window.location.search).get(paramName);
+    if (raw === null || raw === '') return fallback;
+    const v = raw.trim().toLowerCase();
+    if (v === '0' || v === 'false' || v === 'no') return false;
+    if (v === '1' || v === 'true' || v === 'yes') return true;
+  } catch {
+    /* non-browser context */
+  }
+  return fallback;
 }
 
 /** Pick an enemy type by weight. Pure function, easy to unit-test later. */

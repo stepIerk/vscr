@@ -16,7 +16,7 @@
  */
 
 import { mulberry32, range, int, shuffle, clamp } from './rng.js';
-import { SHOP } from '../config.js';
+import { SHOP, PORTAL } from '../config.js';
 
 export const GEN_DEFAULTS = {
   roomCountMin: 12,
@@ -39,7 +39,8 @@ export const GEN_DEFAULTS = {
   spawnMax: 9,
   wingRooms: 15, // rooms per expansion wing
   extraEdgeProb: 0.22, // chance to re-add a short non-MST edge (loops)
-  extraEdgeMaxDist: 1500
+  extraEdgeMaxDist: 1500,
+  withTunnels: true, // false — вместо тоннелей врата-порталы между комнатами
 };
 
 // ------------------------------------------------------------------ rect ops
@@ -370,25 +371,34 @@ export function generateLayout(seed, opts = {}) {
   // --- 2. connection graph: Kruskal MST + short loop edges ---
   const links = linkRooms(rng, rooms, o);
 
-  // --- 3. L-shaped corridors (center to center, random elbow) ---
+  // --- 3. corridors OR portals (режим карты) ---
   const byId = new Map(rooms.map((r) => [r.id, r]));
-  const corridors = routeCorridors(rng, byId, links, o);
+  const withTunnels = o.withTunnels !== false;
+  const corridors = withTunnels ? routeCorridors(rng, byId, links, o) : [];
   const corridorRects = corridors.flatMap((c) => c.rects);
 
-  // --- 4. room walls with door gaps ---
+  // --- 4. room walls: with door gaps (tunnels) or sealed (portals) ---
   for (const r of rooms) buildRoomWalls(r, corridorRects, o);
 
   // --- corridor side walls (gaps where rooms / other corridors cross) ---
-  const corridorWalls = buildCorridorWalls(corridorRects, rooms, o);
+  const corridorWalls = withTunnels ? buildCorridorWalls(corridorRects, rooms, o) : [];
+
+  // Врата считаем до препятствий и спавнов: тогда и то и другое обходит их.
+  // Отдельный RNG-поток — режим тоннелей остаётся байт-в-байт прежним.
+  const portals = withTunnels
+    ? []
+    : placePortals(mulberry32((seed ^ 0x70da1) >>> 0), rooms, links);
+  const portalsByRoom = new Map(rooms.map((r) => [r.id, []]));
+  for (const p of portals) portalsByRoom.get(p.roomId).push(p);
 
   // --- 5. interior wall-block obstacles (same walls as the perimeter) ---
   for (const r of rooms) {
-    r.obstacles = placeObstacles(rng, r, o);
+    r.obstacles = placeObstacles(rng, r, o, portalsByRoom.get(r.id) || []);
   }
 
-  // --- 6. enemy spawn points near the inner perimeter ---
+  // --- 6. enemy spawn points near the inner perimeter (not on the gates) ---
   for (const r of rooms) {
-    r.spawns = r.isStart ? [] : placeSpawns(rng, r, o);
+    r.spawns = r.isStart ? [] : placeSpawns(rng, r, o, portalsByRoom.get(r.id) || []);
   }
 
   // --- 7. room kinds: combat (monsters) vs shop (trader) ---
@@ -399,12 +409,74 @@ export function generateLayout(seed, opts = {}) {
     ...corridorRects.map((c) => ({ ...c, roomId: -1 }))
   ];
 
-  const layout = { seed, rooms, links, corridors, floors, solids: [], corridorWalls, bounds: null, wall: o.wall };
+  const layout = {
+    seed, rooms, links, corridors, floors, solids: [], corridorWalls,
+    bounds: null, wall: o.wall, withTunnels, portals
+  };
   rebuildSolids(layout);
   layout.bounds = computeBounds(floors, layout.solids);
 
   layout.issues = validateLayout(layout);
   return layout;
+}
+
+/**
+ * Расстановка врат-порталов (режим без тоннелей): каждый линк графа
+ * даёт ровно пару врат — по одним в каждой из двух комнат.
+ * Позиции детерминированы отдельным RNG-потоком (сид карты + соль),
+ * чтобы включение порталов не сдвигало остальной RNG.
+ * Врата стоят внутри комнаты, подальше от стен, препятствий и друг от друга.
+ * `existing` — уже размещённые врата (например, при достройке крыла),
+ * чтобы новые не встали впритык к старым.
+ */
+export function placePortals(rng, rooms, links, existing = []) {
+  const byId = new Map(rooms.map((r) => [r.id, r]));
+  const portals = [];
+  const taken = new Map(); // roomId -> [{x, y}]
+  for (const p of existing || []) {
+    const got = taken.get(p.roomId) || [];
+    got.push({ x: p.x, y: p.y });
+    taken.set(p.roomId, got);
+  }
+  const INSET = PORTAL.inset;
+  const MIN_SEP = PORTAL.minSeparation;
+  links.forEach((l, linkIdx) => {
+    for (const side of [l.a, l.b]) {
+      const r = byId.get(side);
+      if (!r) continue;
+      const other = byId.get(side === l.a ? l.b : l.a);
+      const toRoomId = other ? other.id : side;
+      const got = taken.get(side) || [];
+      let spot = null;
+      for (let i = 0; i < 40 && !spot; i++) {
+        // Первые попытки — в сторону соседней комнаты (интуитивно),
+        // затем — где свободно.
+        const bias = i < 12 && other ? 0.65 : 0;
+        const tx = other ? other.cx : r.cx;
+        const ty = other ? other.cy : r.cy;
+        const px = i < 12
+          ? r.cx + (tx - r.cx) * bias * rng() + (rng() - 0.5) * r.w * 0.3
+          : r.x + INSET + rng() * (r.w - INSET * 2);
+        const py = i < 12
+          ? r.cy + (ty - r.cy) * bias * rng() + (rng() - 0.5) * r.h * 0.3
+          : r.y + INSET + rng() * (r.h - INSET * 2);
+        const x = Math.max(r.x + INSET, Math.min(r.x + r.w - INSET, px));
+        const y = Math.max(r.y + INSET, Math.min(r.y + r.h - INSET, py));
+        if (Math.hypot(x - r.cx, y - r.cy) < 120) continue; // центр свободен
+        if ((r.obstacles || []).some((b) => pointInRect(x, y, b, 60))) continue;
+        if (got.some((p) => Math.hypot(p.x - x, p.y - y) < MIN_SEP)) continue;
+        spot = { x, y };
+      }
+      if (!spot) spot = { x: r.cx, y: r.cy };
+      got.push(spot);
+      taken.set(side, got);
+      portals.push({
+        id: portals.length, roomId: side, toRoomId, linkIdx,
+        x: Math.round(spot.x), y: Math.round(spot.y),
+      });
+    }
+  });
+  return portals;
 }
 
 // ---------------------------------------------------------- expansion wing
@@ -481,20 +553,49 @@ export function generateWing(baseSeed, wingIndex, layout, gatewayId, opts = {}) 
   }
   const links = [{ a: gatewayId, b: best.id, d: bd }, ...linkRooms(rng, newRooms, o)];
 
+  // Режим карты запоминаем с первой генерации; крыло его наследует.
+  const withTunnels = layout.withTunnels !== false;
   const allById = new Map([...rooms, ...newRooms].map((r) => [r.id, r]));
-  const corridors = routeCorridors(rng, allById, links, o);
+  const corridors = withTunnels ? routeCorridors(rng, allById, links, o) : [];
   const newCorrRects = corridors.flatMap((c) => c.rects);
-  const allCorrRects = [...layout.corridors.flatMap((c) => c.rects), ...newCorrRects];
+  const allCorrRects = withTunnels
+    ? [...layout.corridors.flatMap((c) => c.rects), ...newCorrRects]
+    : [];
 
-  // Gateway walls are rebuilt with the new door; new rooms get full treatment.
-  buildRoomWalls(gateway, allCorrRects, o);
+  if (withTunnels) {
+    // Gateway walls are rebuilt with the new door; new rooms get full treatment.
+    buildRoomWalls(gateway, allCorrRects, o);
+  }
   for (const r of newRooms) {
     buildRoomWalls(r, allCorrRects, o);
-    r.obstacles = placeObstacles(rng, r, o);
   }
-  for (const r of newRooms) r.spawns = placeSpawns(rng, r, o);
 
-  layout.corridorWalls = buildCorridorWalls(allCorrRects, [...rooms, ...newRooms], o);
+  // Врата новых линков — ДО препятствий и спавнов (чтобы те их обходили).
+  // linkIdx/id сдвигаем на уже имеющиеся, чтобы врата оставались уникальными.
+  let newPortals = [];
+  if (!withTunnels) {
+    const baseLinkIdx = layout.links.length;
+    const basePortalId = layout.portals.length;
+    const portalRng = mulberry32(
+      (((baseSeed >>> 0) ^ Math.imul(wingIndex + 1, 0x51ed270b) ^ 0x70da1) >>> 0) || 1);
+    newPortals = placePortals(portalRng, [...rooms, ...newRooms], links, layout.portals);
+    for (const p of newPortals) {
+      p.linkIdx += baseLinkIdx;
+      p.id += basePortalId;
+    }
+    layout.portals.push(...newPortals);
+  }
+  const portalsByRoom = new Map([...rooms, ...newRooms].map((r) => [r.id, []]));
+  for (const p of layout.portals) portalsByRoom.get(p.roomId).push(p);
+
+  for (const r of newRooms) {
+    r.obstacles = placeObstacles(rng, r, o, portalsByRoom.get(r.id) || []);
+  }
+  for (const r of newRooms) r.spawns = placeSpawns(rng, r, o, portalsByRoom.get(r.id) || []);
+
+  if (withTunnels) {
+    layout.corridorWalls = buildCorridorWalls(allCorrRects, [...rooms, ...newRooms], o);
+  }
   layout.rooms.push(...newRooms);
   // Типы комнат считаются по ОБЩЕЙ нумерации — гарантия «лавка раз в 10
   // комнат» продолжает работать при расширении карты.
@@ -513,7 +614,7 @@ export function generateWing(baseSeed, wingIndex, layout, gatewayId, opts = {}) 
 
 // ------------------------------------------------------- interior obstacles
 
-function placeObstacles(rng, r, o) {
+function placeObstacles(rng, r, o, portals = []) {
   const roll = rng();
   // Density class: ~30% almost empty, ~45% a few small blocks, ~25% larger cluster.
   const budget = roll < 0.3 ? 0 : roll < 0.75 ? int(rng, 1, 2) : int(rng, 2, 4);
@@ -532,9 +633,11 @@ function placeObstacles(rng, r, o) {
     // Keep the room center free (player entry / maneuvering space).
     if (Math.hypot(x + w / 2 - r.cx, y + h / 2 - r.cy) < o.centerClear) continue;
     if (blocks.some((b) => rectsOverlap(expand(cand, o.obstacleGap), b))) continue;
+    // Не ставим блок на врата и в их подступы — телепорт должен читаться.
+    if (portals.some((p) => pointInRect(p.x, p.y, expand(cand, PORTAL.clearance * 0.6)))) continue;
     blocks.push(cand);
-    // Validate: center must still reach every door; otherwise drop the block.
-    if (!roomPathsOpen(r, blocks)) blocks.pop();
+    // Validate: center must still reach every door/gate; otherwise drop the block.
+    if (!roomPathsOpen(r, blocks, portals)) blocks.pop();
   }
   return blocks;
 }
@@ -543,8 +646,8 @@ function expand(r, m) {
   return { x: r.x - m, y: r.y - m, w: r.w + m * 2, h: r.h + m * 2 };
 }
 
-/** Coarse-grid BFS inside one room: center reaches all door mouths. */
-function roomPathsOpen(room, blocks) {
+/** Coarse-grid BFS inside one room: center reaches all door mouths / gates. */
+function roomPathsOpen(room, blocks, portals = []) {
   const CELL = 44;
   const cols = Math.max(2, Math.floor(room.w / CELL));
   const rows = Math.max(2, Math.floor(room.h / CELL));
@@ -553,7 +656,13 @@ function roomPathsOpen(room, blocks) {
     const cy = room.y + ((row + 0.5) / rows) * room.h;
     return blocks.some((b) => pointInRect(cx, cy, expand(b, 26)));
   };
-  const targets = room.doors.map((d) => {
+  // Портальный режим: целей-дверей нет, достижимость проверяем по вратам.
+  const targets = portals.length
+    ? portals.map((p) => [
+        clamp(Math.floor(((p.x - room.x) / room.w) * cols), 0, cols - 1),
+        clamp(Math.floor(((p.y - room.y) / room.h) * rows), 0, rows - 1)
+      ])
+    : room.doors.map((d) => {
     let px, py;
     if (d.side === 'N') [px, py] = [clamp(d.at, room.x + 20, room.x + room.w - 20), room.y + 30];
     else if (d.side === 'S') [px, py] = [clamp(d.at, room.x + 20, room.x + room.w - 20), room.y + room.h - 30];
@@ -582,7 +691,7 @@ function roomPathsOpen(room, blocks) {
 
 // ------------------------------------------------------------ spawn points
 
-function placeSpawns(rng, r, o) {
+function placeSpawns(rng, r, o, portals = []) {
   const count = clamp(Math.round((r.w * r.h) / o.spawnAreaPer), o.spawnMin, o.spawnMax);
   const pts = [];
   const sides = shuffle(rng, ['N', 'S', 'W', 'E']);
@@ -596,6 +705,8 @@ function placeSpawns(rng, r, o) {
     else if (side === 'W') [x, y] = [r.x + off, r.y + r.h * t];
     else [x, y] = [r.x + r.w - off, r.y + r.h * t];
     if (r.obstacles.some((b) => pointInRect(x, y, expand(b, 30)))) continue;
+    // Врата держим свободными: враг не должен появляться в зоне телепорта.
+    if (portals.some((p) => Math.hypot(p.x - x, p.y - y) < PORTAL.clearance)) continue;
     if (pts.some((p) => Math.hypot(p.x - x, p.y - y) < o.spawnMinSep)) continue;
     pts.push({ x, y });
   }
@@ -654,6 +765,36 @@ export function validateLayout(layout) {
     }
   }
   if (seen.size !== layout.rooms.length) issues.push(`disconnected graph: ${seen.size}/${layout.rooms.length} reachable`);
+  if (layout.withTunnels === false) {
+    // Портальный режим: у каждой комнаты — врата на каждый линк, тоннелей нет.
+    const byRoom = new Map(layout.rooms.map((r) => [r.id, []]));
+    for (const p of layout.portals || []) {
+      if (!byRoom.has(p.roomId)) {
+        issues.push(`portal ${p.id} in unknown room ${p.roomId}`);
+        continue;
+      }
+      byRoom.get(p.roomId).push(p);
+      const host = layout.rooms[p.roomId];
+      if (!pointInRect(p.x, p.y, host, -24)) issues.push(`portal ${p.id} outside room ${p.roomId}`);
+    }
+    const deg = new Map(layout.rooms.map((r) => [r.id, 0]));
+    for (const l of layout.links) {
+      deg.set(l.a, (deg.get(l.a) || 0) + 1);
+      deg.set(l.b, (deg.get(l.b) || 0) + 1);
+    }
+    for (const r of layout.rooms) {
+      const want = deg.get(r.id) || 0;
+      const got = (byRoom.get(r.id) || []).length;
+      if (want > 0 && got !== want) issues.push(`room ${r.id} portals ${got} != links ${want}`);
+    }
+    // Каждый линк — ровно пара врат с одинаковым linkIdx.
+    const perLink = new Map();
+    for (const p of layout.portals || []) perLink.set(p.linkIdx, (perLink.get(p.linkIdx) || 0) + 1);
+    layout.links.forEach((l, i) => {
+      if ((perLink.get(i) || 0) !== 2) issues.push(`link ${l.a}-${l.b} has ${perLink.get(i) || 0} portals, want 2`);
+    });
+    return issues;
+  }
   // Every room needs at least one door; every corridor must touch a room.
   for (const r of layout.rooms) {
     if (r.doors.length === 0) issues.push(`room ${r.id} has no doors`);

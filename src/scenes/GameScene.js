@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import {
   COLORS, DUNGEON, PLAYER, HERO_BASE, ENEMIES, ENEMY_LEVEL, SPAWNS, RESOURCE, WEAPON,
   ALLIES, ALLY_TYPES, MUTATIONS, PLASMA, SHOP, ARTIFACTS, ARTIFACT_CATALOG, UPGRADES,
-  GROWTHS, pickEnemyType, resolveSeed
+  GROWTHS, ARENA, PORTAL, pickEnemyType, resolveSeed, resolveWithTunnels
 } from '../config.js';
 import { generateLayout, generateWing, roomDegrees } from '../world/generator.js';
 import { WorldBuilder } from '../world/WorldBuilder.js';
@@ -45,6 +45,7 @@ const TEX = {
   coin: 'coin',
   relic: 'relic',
   tonic: 'tonic',
+  portal: 'portal',
   'enemy-a': 'enemy-a',
   'enemy-b': 'enemy-b',
   'enemy-c': 'enemy-c',
@@ -53,7 +54,7 @@ const TEX = {
   'cell-parasite': 'cell-parasite'
 };
 
-const TEX_SIZE = { dot: 8, player: 40, shell: 56, bullet: 16, mote: 20, plasma: 24, growth: 48, stand: 64, coin: 20, relic: 28, tonic: 24, 'enemy-a': 32, 'enemy-b': 36, 'enemy-c': 48, 'cell-hunter': 28, 'cell-defender': 36, 'cell-parasite': 24 };
+const TEX_SIZE = { dot: 8, player: 40, shell: 56, bullet: 16, mote: 20, plasma: 24, growth: 48, stand: 64, coin: 20, relic: 28, tonic: 24, portal: 56, 'enemy-a': 32, 'enemy-b': 36, 'enemy-c': 48, 'cell-hunter': 28, 'cell-defender': 36, 'cell-parasite': 24 };
 
 const MERGE_BADGE = ['I', 'II', 'III', 'IV', 'V'];
 
@@ -219,6 +220,25 @@ function ensureTextures(scene) {
     g.fillRect(c - 5, c - 2, 10, 3);
   });
 
+  // Portal: белая основа-«мембрана», красится тинтом в цвет пары врат.
+  if (!scene.textures.exists(TEX.portal)) {
+    const s = TEX_SIZE.portal;
+    const g = scene.add.graphics();
+    const c = s / 2;
+    g.fillStyle(0xffffff, 0.22);
+    g.fillCircle(c, c, 26);
+    g.fillStyle(0xffffff, 0.85);
+    g.fillCircle(c, c, 20);
+    g.fillStyle(0x0a0507, 1);
+    g.fillCircle(c, c, 13);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(c, c, 10);
+    g.lineStyle(2, 0xffffff, 0.9);
+    g.strokeCircle(c, c, 24);
+    g.generateTexture(TEX.portal, s, s);
+    g.destroy();
+  }
+
   // Enemy A: triangle (fast, fragile).
   if (!scene.textures.exists(TEX['enemy-a'])) {
     const s = TEX_SIZE['enemy-a'];
@@ -369,6 +389,9 @@ export class GameScene extends Phaser.Scene {
 
     // --- Procedural tissue: rooms + tunnels (seeded, deterministic) ---
     const t0 = performance.now();
+    // Режим карты: тоннели (по умолчанию) или врата-порталы (?tunnels=0).
+    const withTunnels = resolveWithTunnels(DUNGEON.withTunnels);
+    this.portalMode = withTunnels === false;
     this.layout = generateLayout(this.seed, {
       roomCountMin: DUNGEON.roomCountMin,
       roomCountMax: DUNGEON.roomCountMax,
@@ -379,7 +402,8 @@ export class GameScene extends Phaser.Scene {
       wall: DUNGEON.wall,
       spawnAreaPer: DUNGEON.spawnAreaPer,
       spawnMin: DUNGEON.spawnMin,
-      spawnMax: DUNGEON.spawnMax
+      spawnMax: DUNGEON.spawnMax,
+      withTunnels
     });
     this.worldApi = new WorldBuilder(this, this.layout, COLORS).build();
     this.builder = this.worldApi.builder;
@@ -417,7 +441,11 @@ export class GameScene extends Phaser.Scene {
     this.stands = this.physics.add.staticGroup(); // стенды лавки (блокируют, покупаем на E)
     this.standViews = []; // { base, item, label, roomId, kind, key, price, sold }
     this.standPrompt = null;
+    this.arenaBarriers = this.physics.add.staticGroup(); // барьеры закрытых дверей арены
     this.allies = this.physics.add.group();
+    this.portalGroup = this.physics.add.staticGroup(); // тела врат (overlap, не блокируют)
+    this.portalViews = new Map(); // portalId -> { zone, ring, data, locked }
+    this.portalCooldownUntil = 0;
     this.spawnGrowths(this.layout.rooms[0]); // наросты стартовой комнаты — после создания групп
 
     // --- Player (center of the safe start room) ---
@@ -498,13 +526,22 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.stands); // стенды — твёрдые
     this.physics.add.collider(this.enemies, this.stands);
     this.physics.add.collider(this.allies, this.stands);
+    // Барьеры арены держат всех внутри: игрока, врагов, колонию, стенды не нужны.
+    this.physics.add.collider(this.player, this.arenaBarriers);
+    this.physics.add.collider(this.enemies, this.arenaBarriers);
+    this.physics.add.collider(this.allies, this.arenaBarriers);
     this.physics.add.collider(this.allies, this.worldApi.bodies);
     this.physics.add.collider(this.allies, this.allies); // de-stack colony
     this.physics.add.collider(this.bullets, this.worldApi.bodies, this.onBulletWall, null, this);
+    // Барьеры арены держат и снаряды — нельзя расстрелять соседнюю комнату сквозь дверь.
+    this.physics.add.collider(this.bullets, this.arenaBarriers, this.onBulletWall, null, this);
     this.physics.add.overlap(this.bullets, this.enemies, this.onBulletHit, null, this);
     // Наросты ловят снаряды overlap'ом (без collider — не блокируют движение).
     this.physics.add.overlap(this.bullets, this.growths, this.onBulletGrowth, null, this);
+    // Врата — overlap-триггер: вход в зону телепортирует игрока и колонию.
+    this.physics.add.overlap(this.player, this.portalGroup, this.onPortalTouch, null, this);
     this.fireAcc = this.heroStats().intervalMs; // first shot ready immediately
+    this.spawnAllPortals();
   }
 
   // ----------------------------------------------------------------- update
@@ -532,6 +569,7 @@ export class GameScene extends Phaser.Scene {
     this.updateShell(dt);
     this.updateAllyViews();
     this.updateShopStands();
+    this.updatePortals();
     this.minimapAcc += dt;
     if (this.minimapAcc >= 300) {
       this.minimapAcc = 0;
@@ -664,6 +702,7 @@ export class GameScene extends Phaser.Scene {
     room.activated = true;
     room.spawnedTotal = 0;
     room.markersPending = 0;
+    this.refreshRoomPortals(room);
     // Лавка: монстров нет, считается зачищенной сразу, товар — физические стенды.
     if (room.type === 'shop') {
       room.cleared = SHOP_CLEAR;
@@ -682,11 +721,290 @@ export class GameScene extends Phaser.Scene {
     }
     this.spawnGrowths(room); // наросты появляются вместе с активацией комнаты
     room.cleared = false;
+    // Арена: колония втягивается внутрь, двери закрываются, затем бой.
+    this.gatherColony(room);
+    this.lockArena(room);
     room.queue = room.spawns.map((p) => ({ ...p }));
     // Level scaling: extra spawn markers on top of the base points.
     const extra = (this.run.level - 1) * ENEMY_LEVEL.extraSpawnsPerLevel;
     for (const p of this.sampleExtraSpawns(room, extra)) room.queue.push(p);
     this.tryQueue(room);
+    ui.toast('Арена закрыта — зачисти комнату');
+  }
+
+  /**
+   * Колония втягивается в комнату: отставшие клетки телепортируются
+   * к игроку (иначе двери закроются у них перед носом).
+   */
+  gatherColony(room) {
+    const pad = 60;
+    for (const cell of this.run.cells) {
+      const v = this.allyViews.get(cell.id);
+      if (!v || !v.sprite.active) continue;
+      const sp = v.sprite;
+      const inside =
+        sp.x > room.x + pad && sp.x < room.x + room.w - pad &&
+        sp.y > room.y + pad && sp.y < room.y + room.h - pad;
+      if (inside) continue;
+      const a = Math.random() * Math.PI * 2;
+      const spot = this.worldApi.nearestWalkable(
+        this.player.x + Math.cos(a) * 70,
+        this.player.y + Math.sin(a) * 70, 16);
+      if (!spot) continue;
+      sp.body.reset(spot.x, spot.y);
+      sp.setVelocity(0, 0);
+      cell.path = null;
+    }
+  }
+
+  /**
+   * Закрыть двери комнаты барьерами: по одному статическому телу
+   * на каждый дверной проём (данные уже есть в room.doors + gaps).
+   * Идемпотентно: повторный вход барьеры не дублирует.
+   */
+  lockArena(room) {
+    if (room.arenaLocked) return;
+    room.arenaLocked = true;
+    room.arenaBarrierViews = [];
+    this.refreshRoomPortals(room);
+    // Портальный режим: глухих стен нет, «закрытие» = блокировка врат.
+    if (this.portalMode) {
+      ui.toast('Врата закрыты — зачисти комнату');
+      return;
+    }
+    // Игрок мог стоять прямо в проёме — выталкиваем внутрь до закрытия.
+    const inner = this.worldApi.nearestWalkable(
+      Math.max(room.x + 60, Math.min(room.x + room.w - 60, this.player.x)),
+      Math.max(room.y + 60, Math.min(room.y + room.h - 60, this.player.y)), 14);
+    if (inner) {
+      this.player.body.reset(inner.x, inner.y);
+      this.player.setVelocity(0, 0);
+    }
+    // Враги могли гнаться и стоять в проёме — втягиваем их внутрь арены.
+    for (const e of this.enemies.getChildren()) {
+      if (!e.active) continue;
+      const er = e.getData('radius') || 14;
+      const insideArena =
+        e.x > room.x + er && e.x < room.x + room.w - er &&
+        e.y > room.y + er && e.y < room.y + room.h - er;
+      if (insideArena) continue;
+      const spot = this.worldApi.nearestWalkable(
+        Math.max(room.x + 60, Math.min(room.x + room.w - 60, e.x)),
+        Math.max(room.y + 60, Math.min(room.y + room.h - 60, e.y)), er);
+      if (spot) {
+        e.body.reset(spot.x, spot.y);
+        e.setVelocity(0, 0);
+      }
+    }
+    const T = this.layout.wall || DUNGEON.wall;
+    const spans = this.arenaDoorSpans(room, T);
+    for (const s of spans) {
+      const cx = s.x + s.w / 2;
+      const cy = s.y + s.h / 2;
+      const w = Math.max(8, s.w);
+      const h = Math.max(8, s.h);
+      const gfx = this.add.rectangle(cx, cy, w, h, ARENA.barrierColor, ARENA.barrierAlpha).setDepth(3);
+      this.physics.add.existing(gfx, true); // static body под размер прямоугольника
+      if (gfx.body) {
+        if (gfx.body.setSize) gfx.body.setSize(w, h);
+        if (gfx.body.updateFromGameObject) gfx.body.updateFromGameObject();
+      }
+      this.arenaBarriers.add(gfx);
+      room.arenaBarrierViews.push(gfx);
+      // Пульсация плоти-барьера чтобы закрытие читалось.
+      this.tweens.add({ targets: gfx, alpha: 0.55, duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
+  }
+
+  /**
+   * Прямоугольники дверных проёмов комнаты в мировых координатах.
+   * Источник — room.gaps (интервалы разрывов стен) + толщина стены.
+   */
+  arenaDoorSpans(room, T) {
+    const spans = [];
+    const gaps = room.gaps || { N: [], S: [], W: [], E: [] };
+    const clampX = (a, b) => [
+      Math.max(room.x - 4, Math.min(room.x + room.w + 4, a)),
+      Math.max(room.x - 4, Math.min(room.x + room.w + 4, b))];
+    const clampY = (a, b) => [
+      Math.max(room.y - 4, Math.min(room.y + room.h + 4, a)),
+      Math.max(room.y - 4, Math.min(room.y + room.h + 4, b))];
+    for (const [a, b] of gaps.N || []) {
+      const [x0, x1] = clampX(a, b);
+      spans.push({ x: x0, y: room.y - T - 6, w: Math.max(8, x1 - x0), h: T + 12 });
+    }
+    for (const [a, b] of gaps.S || []) {
+      const [x0, x1] = clampX(a, b);
+      spans.push({ x: x0, y: room.y + room.h - 6, w: Math.max(8, x1 - x0), h: T + 12 });
+    }
+    for (const [a, b] of gaps.W || []) {
+      const [y0, y1] = clampY(a, b);
+      spans.push({ x: room.x - T - 6, y: y0, w: T + 12, h: Math.max(8, y1 - y0) });
+    }
+    for (const [a, b] of gaps.E || []) {
+      const [y0, y1] = clampY(a, b);
+      spans.push({ x: room.x + room.w - 6, y: y0, w: T + 12, h: Math.max(8, y1 - y0) });
+    }
+    // Fallback: если gaps пусты (старый сейв/wing) — строим по room.doors.
+    if (!spans.length && room.doors) {
+      for (const d of room.doors) {
+        const half = DUNGEON.tunnelWidth / 2 + 12;
+        if (d.side === 'N') spans.push({ x: d.at - half, y: room.y - T - 6, w: half * 2, h: T + 12 });
+        else if (d.side === 'S') spans.push({ x: d.at - half, y: room.y + room.h - 6, w: half * 2, h: T + 12 });
+        else if (d.side === 'W') spans.push({ x: room.x - T - 6, y: d.at - half, w: T + 12, h: half * 2 });
+        else spans.push({ x: room.x + room.w - 6, y: d.at - half, w: T + 12, h: half * 2 });
+      }
+    }
+    return spans;
+  }
+
+  /** Открыть двери комнаты: убрать барьеры после зачистки. */
+  unlockArena(room) {
+    if (!room || !room.arenaLocked) return;
+    room.arenaLocked = false;
+    for (const gfx of room.arenaBarrierViews || []) {
+      if (!gfx) continue;
+      this.tweens.killTweensOf(gfx);
+      this.arenaBarriers.remove(gfx, true, true);
+    }
+    room.arenaBarrierViews = [];
+    this.refreshRoomPortals(room);
+    ui.toast(this.portalMode ? 'Врата открыты' : 'Арена открыта');
+  }
+
+  // ---------------------------------------------------------- portals
+
+  /** Цвет пары врат по индексу линка — обе стороны одинаковые. */
+  portalPairColor(linkIdx) {
+    return PORTAL.pairColors[linkIdx % PORTAL.pairColors.length];
+  }
+
+  /** Заблокированы ли врата: незачищенная боевая комната не выпускает. */
+  portalLocked(room) {
+    return !!room && room.type === 'combat' && !room.isStart &&
+      room.activated && !room.cleared;
+  }
+
+  /** Спавн всех врат карты (портальный режим). Идемпотентно по portalId. */
+  spawnAllPortals() {
+    if (!this.portalMode) return;
+    for (const p of this.layout.portals || []) this.spawnPortalView(p);
+  }
+
+  /** Спавн врат крыла расширения (только новые portalId). */
+  spawnNewPortals() {
+    if (!this.portalMode) return;
+    for (const p of this.layout.portals || []) {
+      if (!this.portalViews.has(p.id)) this.spawnPortalView(p);
+    }
+  }
+
+  /** Один портал: зона-триггер + кольцо в цвете пары + мягкая пульсация. */
+  spawnPortalView(p) {
+    if (this.portalViews.has(p.id)) return;
+    const color = this.portalPairColor(p.linkIdx);
+    const zone = this.portalGroup.create(p.x, p.y, TEX.portal);
+    if (!zone) return;
+    zone.setDepth(4);
+    zone.setTint(color);
+    zone.setData('portalId', p.id);
+    zone.body.setCircle(PORTAL.radius, TEX_SIZE.portal / 2 - PORTAL.radius, TEX_SIZE.portal / 2 - PORTAL.radius);
+    zone.body.updateFromGameObject();
+    const ring = this.add.circle(p.x, p.y, PORTAL.bodyRadius + 8)
+      .setStrokeStyle(3, color, 0.8).setDepth(3);
+    this.tweens.add({
+      targets: [zone, ring], scale: 1.08, duration: 800 + (p.id % 5) * 90,
+      yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    });
+    const view = { zone, ring, data: p, locked: false, color };
+    this.portalViews.set(p.id, view);
+    this.refreshPortalLock(view, this.layout.rooms[p.roomId]);
+  }
+
+  /** Перекраска врат при блокировке/разблокировке комнаты. */
+  refreshPortalLock(view, room) {
+    if (!view || !view.zone || !view.zone.active) return;
+    const locked = this.portalLocked(room);
+    view.locked = locked;
+    const tint = locked ? PORTAL.lockedColor : view.color;
+    view.zone.setTint(tint);
+    if (view.ring && view.ring.active) view.ring.setStrokeStyle(3, tint, locked ? 1 : 0.8);
+  }
+
+  /** Обновить замки всех врат комнаты (вызывается при lock/unlock арены). */
+  refreshRoomPortals(room) {
+    if (!this.portalMode || !room) return;
+    for (const view of this.portalViews.values()) {
+      if (view.data.roomId === room.id) this.refreshPortalLock(view, room);
+    }
+  }
+
+  /** Касание врат игроком: телепорт в парные врата + колония следом. */
+  onPortalTouch(player, zone) {
+    if (this.isGameOver || this.modalOpen) return;
+    if (this.time.now < this.portalCooldownUntil) return;
+    const view = this.portalViews.get(zone.getData('portalId'));
+    if (!view) return;
+    const room = this.layout.rooms[view.data.roomId];
+    if (this.portalLocked(room)) {
+      ui.toast('Врата закрыты — зачисти комнату');
+      return;
+    }
+    const dest = (this.layout.portals || []).find(
+      (q) => q.linkIdx === view.data.linkIdx && q.id !== view.data.id);
+    if (!dest) return;
+    this.teleportThroughPortal(dest);
+  }
+
+  /** Телепорт: игрок + вся колония к вратам назначения. */
+  teleportThroughPortal(dest) {
+    const destRoom = this.layout.rooms[dest.roomId];
+    if (!destRoom) return;
+    const dx = dest.x - destRoom.cx;
+    const dy = dest.y - destRoom.cy;
+    const len = Math.hypot(dx, dy) || 1;
+    const ax = dest.x - (dx / len) * PORTAL.exitOffset;
+    const ay = dest.y - (dy / len) * PORTAL.exitOffset;
+    const arrival = this.worldApi.nearestWalkable(
+      Math.max(destRoom.x + 40, Math.min(destRoom.x + destRoom.w - 40, ax)),
+      Math.max(destRoom.y + 40, Math.min(destRoom.y + destRoom.h - 40, ay)), 14)
+      || { x: destRoom.cx, y: destRoom.cy };
+    this.player.body.reset(arrival.x, arrival.y);
+    this.player.setVelocity(0, 0);
+    const placed = [{ x: arrival.x, y: arrival.y }];
+    for (const cell of this.run.cells) {
+      const v = this.allyViews.get(cell.id);
+      if (!v || !v.sprite.active) continue;
+      let spot = null;
+      for (let i = 0; i < 8 && !spot; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const cand = this.worldApi.nearestWalkable(
+          arrival.x + Math.cos(a) * (50 + i * 12),
+          arrival.y + Math.sin(a) * (50 + i * 12), 12);
+        if (cand && placed.every((p) => Math.hypot(p.x - cand.x, p.y - cand.y) > 34)) spot = cand;
+      }
+      if (!spot) spot = arrival;
+      placed.push(spot);
+      v.sprite.body.reset(spot.x, spot.y);
+      v.sprite.setVelocity(0, 0);
+      cell.path = null;
+      cell.target = null;
+    }
+    this.portalCooldownUntil = this.time.now + PORTAL.cooldownMs;
+    this.hitSparks.explode(10, arrival.x, arrival.y);
+  }
+
+  /** Замки врат зависят от cleared — проверяем дешёвым тиком. */
+  updatePortals() {
+    if (!this.portalMode || this.portalViews.size === 0) return;
+    this._portalLockAcc = (this._portalLockAcc || 0) + 1;
+    if (this._portalLockAcc < 30) return;
+    this._portalLockAcc = 0;
+    for (const view of this.portalViews.values()) {
+      const room = this.layout.rooms[view.data.roomId];
+      const locked = this.portalLocked(room);
+      if (locked !== view.locked) this.refreshPortalLock(view, room);
+    }
   }
 
   /** Открыть окно лавки (с генерацией товара под текущий прогресс). */
@@ -710,6 +1028,11 @@ export class GameScene extends Phaser.Scene {
     const sx = SHOP.standSpacingX;
     const sy = SHOP.standSpacingY;
     const mouths = this.doorMouths(room);
+    // В портальном режиме стенды не ставим на врата (иначе игрок застрянет
+    // у входа в зону телепорта — стенд физически блокирует подход).
+    const portals = this.portalMode
+      ? (this.layout.portals || []).filter((p) => p.roomId === room.id)
+      : [];
     const spots = [];
     const rows = Math.ceil(n / cols);
     for (let row = 0; row < rows + 2 && spots.length < n; row++) {
@@ -720,6 +1043,7 @@ export class GameScene extends Phaser.Scene {
         const px = Math.max(room.x + 70, Math.min(room.x + room.w - 70, x));
         const py = Math.max(room.y + 90, Math.min(room.y + room.h - 70, y));
         if (mouths.some((m) => Math.hypot(m.x - px, m.y - py) < SHOP.doorClearance)) continue;
+        if (portals.some((p) => Math.hypot(p.x - px, p.y - py) < PORTAL.clearance)) continue;
         if (!this.worldApi.isWalkable(px, py, SHOP.standRadius)) continue;
         if (spots.some((p) => Math.hypot(p.x - px, p.y - py) < sx * 0.7)) continue;
         spots.push({ x: px, y: py });
@@ -1088,10 +1412,18 @@ export class GameScene extends Phaser.Scene {
     if ((room.markersPending || 0) > 0 || (room.queue && room.queue.length)) return;
     if (!room.spawnedTotal) {
       room.cleared = true; // activated but nothing ever queued: vacuously done
+      this.unlockArena(room);
       return;
     }
-    const alive = this.enemies.getChildren().some((e) => e.active && e.getData('roomId') === room.id);
-    if (!alive) room.cleared = true; // stays cleared for the rest of the run
+    // Зачистка — только по врагам арены: зашедшие снаружи (roomId чужой)
+    // двери не блокируют, их добьём после открытия.
+    const alive = this.enemies.getChildren().some(
+      (e) => e.active && e.getData('roomId') === room.id &&
+        e.x > room.x && e.x < room.x + room.w && e.y > room.y && e.y < room.y + room.h);
+    if (!alive) {
+      room.cleared = true; // stays cleared for the rest of the run
+      this.unlockArena(room);
+    }
   }
 
   // ------------------------------------------------------ map expansion
@@ -1151,6 +1483,7 @@ export class GameScene extends Phaser.Scene {
     const newRooms = res.roomIds.map((id) => this.layout.rooms[id]);
     const newCorridors = this.layout.corridors.slice(-res.corridorCount);
     this.builder.addExpansion(newRooms, newCorridors, 0x1000 * wingIndex + 0x77);
+    this.spawnNewPortals();
     // World + camera bounds grow; bullets use playBounds live.
     const b = this.layout.bounds;
     this.playBounds = b;
@@ -1237,10 +1570,7 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /**
-   * Наросты комнаты: сид зависит только от seed карты и id комнаты,
-   * поэтому перезапуск даёт те же наросты независимо от порядка обхода.
-   */
+  /** Один нарост в комнате: позиция, хп, вид. Не загораживает врата. */
   spawnGrowths(room) {
     if (room.growthsSpawned) return;
     room.growthsSpawned = true;
@@ -1249,6 +1579,9 @@ export class GameScene extends Phaser.Scene {
       ? (rng() < 0.7 ? 1 : 0)
       : GROWTHS.minPerRoom + Math.floor(rng() * (GROWTHS.maxPerRoom - GROWTHS.minPerRoom + 1));
     const mouths = this.doorMouths(room);
+    const portals = this.portalMode
+      ? (this.layout.portals || []).filter((p) => p.roomId === room.id)
+      : [];
     const placed = [];
     for (let i = 0; i < n * 30 && placed.length < n; i++) {
       const x = room.x + GROWTHS.inset + rng() * (room.w - GROWTHS.inset * 2);
@@ -1256,6 +1589,7 @@ export class GameScene extends Phaser.Scene {
       const radius = GROWTHS.radiusMin + rng() * (GROWTHS.radiusMax - GROWTHS.radiusMin);
       if (!this.worldApi.isWalkable(x, y, radius)) continue; // стены и препятствия
       if (mouths.some((m) => Math.hypot(m.x - x, m.y - y) < GROWTHS.doorClearance)) continue;
+      if (portals.some((p) => Math.hypot(p.x - x, p.y - y) < PORTAL.clearance)) continue;
       if (placed.some((p) => Math.hypot(p.x - x, p.y - y) < GROWTHS.minSeparation)) continue;
       placed.push({ x, y, radius });
     }

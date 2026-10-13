@@ -4,7 +4,14 @@
  * world bounds), so the map stays readable no matter how many wings grow.
  * Fog of war: only explored rooms (visited/cleared) and their direct
  * neighbours are drawn — the rest stays black.
+ *
+ * Two map modes:
+ * - tunnels: corridors drawn as rects (as before);
+ * - portals: no corridors at all — links drawn as thin lines and gates as
+ *   small dots (pair-coloured, only inside explored rooms).
  */
+
+import { PORTAL } from '../config.js';
 
 const SIZE = 220;
 const VIEW = 7600; // world px across the map (constant zoom; ~a dozen chambers)
@@ -22,6 +29,14 @@ export function computeVisibleRooms(rooms, links) {
     if (explored.has(l.b)) vis.add(l.a);
   }
   return vis;
+}
+
+/** #rrggbb-строка с альфой для canvas (цвета врат в конфиге — числа). */
+function hexAlpha(color, alpha) {
+  const r = (color >> 16) & 255;
+  const g = (color >> 8) & 255;
+  const b = color & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 export class Minimap {
@@ -56,6 +71,11 @@ export class Minimap {
     ];
   }
 
+  /** Цвет пары врат по индексу линка — тот же, что в мире. */
+  pairColor(linkIdx) {
+    return PORTAL.pairColors[linkIdx % PORTAL.pairColors.length];
+  }
+
   /** Redraw when exploration state changed or the player moved enough. */
   update(px, py, layout, currentId) {
     if (!this.canvas || !layout) return;
@@ -65,6 +85,7 @@ export class Minimap {
       layout.rooms.map((r) => (r.cleared ? 2 : r.visited ? 1 : 0)).join('') +
       '|' + currentId + '|' + layout.rooms.length +
       '|' + layout.rooms.map((r) => (r.type === 'shop' ? 1 : 0)).join('') +
+      '|' + (layout.withTunnels === false ? 'p' : 't') + (layout.portals || []).length +
       '|' + Math.round(px / 40) + ',' + Math.round(py / 40);
     if (now - this.last < 300 && key === this.lastKey) return;
     this.last = now;
@@ -75,15 +96,34 @@ export class Minimap {
     g.fillRect(0, 0, SIZE, SIZE);
     const vis = computeVisibleRooms(layout.rooms, layout.links);
     const byId = new Map(layout.rooms.map((r) => [r.id, r]));
-    // Visible tunnels first (a link shows when either end is visible).
+    const portalMode = layout.withTunnels === false;
+    // Tunnels first (a link shows when either end is visible).
     g.fillStyle = '#241014';
-    for (let i = 0; i < layout.corridors.length; i++) {
-      const link = layout.links[i];
-      const show = !link || vis.has(link.a) || vis.has(link.b);
-      if (!show) continue;
-      for (const t of layout.corridors[i].rects) {
-        const [x, y, w, h] = this.rect(t, v);
-        g.fillRect(x, y, w, h);
+    if (!portalMode) {
+      for (let i = 0; i < layout.corridors.length; i++) {
+        const link = layout.links[i];
+        const show = !link || vis.has(link.a) || vis.has(link.b);
+        if (!show) continue;
+        for (const t of layout.corridors[i].rects) {
+          const [x, y, w, h] = this.rect(t, v);
+          g.fillRect(x, y, w, h);
+        }
+      }
+    } else {
+      // Портальный режим: тоннелей нет, связи — тонкие линии. Обе стороны
+      // одного линка одного цвета (как и врата в мире).
+      g.lineWidth = 2;
+      for (let i = 0; i < layout.links.length; i++) {
+        const link = layout.links[i];
+        if (!vis.has(link.a) && !vis.has(link.b)) continue;
+        const A = byId.get(link.a);
+        const B = byId.get(link.b);
+        if (!A || !B) continue;
+        g.strokeStyle = hexAlpha(this.pairColor(i), 0.75);
+        g.beginPath();
+        g.moveTo((A.cx - v.x) * this.scale, (A.cy - v.y) * this.scale);
+        g.lineTo((B.cx - v.x) * this.scale, (B.cy - v.y) * this.scale);
+        g.stroke();
       }
     }
     for (const rm of layout.rooms) {
@@ -116,6 +156,20 @@ export class Minimap {
         g.strokeStyle = '#40e0d0';
         g.lineWidth = 1.5;
         g.strokeRect(x, y, w, h);
+      }
+    }
+    if (portalMode) {
+      // Врата рисуем только в исследованных комнатах — иначе миникарта палит
+      // неисследованное (как и метка лавки).
+      for (const p of layout.portals || []) {
+        const host = byId.get(p.roomId);
+        if (!host || !(host.visited || host.cleared)) continue;
+        const x = (p.x - v.x) * this.scale;
+        const y = (p.y - v.y) * this.scale;
+        g.fillStyle = hexAlpha(this.pairColor(p.linkIdx), 1);
+        g.beginPath();
+        g.arc(x, y, 2.6, 0, Math.PI * 2);
+        g.fill();
       }
     }
     if (currentId != null) {

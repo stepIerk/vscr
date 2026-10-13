@@ -1,5 +1,5 @@
 import { generateLayout, pointInRect } from './src/world/generator.js';
-import { DUNGEON } from './src/config.js';
+import { DUNGEON, SHOP, PORTAL } from './src/config.js';
 
 // Тест генерирует мир теми же параметрами, что и сцена.
 const OPTS = {
@@ -21,10 +21,8 @@ const ok = (name, cond, extra = '') => {
   console.log((cond ? 'PASS' : 'FAIL') + ' | ' + name + (extra ? ' | ' + extra : ''));
 };
 
-for (const seed of [1, 7, 42, 4242, 1337, 2026, 99999]) {
-  const L = generateLayout(seed, OPTS);
-  const HW = 60, T = 24;
-
+/** Общие проверки: комнаты, типы, лавки, спавны (не зависят от режима карты). */
+function checkCommon(L, seed) {
   ok(`seed ${seed}: no layout issues`, L.issues.length === 0, JSON.stringify(L.issues));
   ok(`seed ${seed}: 12-18 rooms`, L.rooms.length >= 12 && L.rooms.length <= 18, `${L.rooms.length}`);
   // Стартовая комната может быть немного меньше обычной (startRoomMin).
@@ -32,15 +30,86 @@ for (const seed of [1, 7, 42, 4242, 1337, 2026, 99999]) {
   ok(`seed ${seed}: room sizes ${DUNGEON.roomMin}-${DUNGEON.roomMax}`,
     nonStartR.every((r) => r.w >= DUNGEON.roomMin && r.w <= DUNGEON.roomMax && r.h >= DUNGEON.roomMin && r.h <= DUNGEON.roomMax),
     `[${L.rooms.map((r) => Math.round(r.w)).join(',')}]`);
-  const nonStart = nonStartR;
   ok(`seed ${seed}: start room typed combat`, L.rooms[0].type === 'combat' && L.rooms[0].spawns.length === 0);
-  const fighting = nonStart.filter((r) => r.type !== 'shop'); // лавки без спавнов
+  const fighting = nonStartR.filter((r) => r.type !== 'shop'); // лавки без спавнов
   ok(`seed ${seed}: 3-9 spawns in fighting rooms`, fighting.every((r) => r.spawns.length >= 3 && r.spawns.length <= 9),
     `[${fighting.map((r) => r.spawns.length)}]`);
-  // Гарантия лавки: каждая 10-я нестартовая комната — лавка.
-  const forcedOk = nonStart.every((r, i) => !(i > 0 && i % 10 === 0) || r.type === 'shop');
-  ok(`seed ${seed}: shop guaranteed every 10 rooms`, forcedOk,
-    `shops=${nonStart.filter((r) => r.type === 'shop').length}`);
+  // Гарантия лавки: каждая N-я нестартовая комната — лавка, пока не упираемся
+  // в потолок доли (maxShare). Проверяем по фактической раскладке генератора.
+  const maxShops = Math.max(1, Math.floor(nonStartR.length * SHOP.maxShare));
+  const wantShops = Math.min(maxShops,
+    nonStartR.filter((r, i) => i > 0 && i % SHOP.guaranteedEvery === 0).length);
+  const gotShops = nonStartR.filter((r) => r.type === 'shop').length;
+  ok(`seed ${seed}: shops >= guaranteed (every ${SHOP.guaranteedEvery}, cap ${maxShops})`,
+    gotShops >= Math.max(1, wantShops - (SHOP.guaranteedEvery - 1)) && gotShops <= maxShops,
+    `want~${wantShops} got ${gotShops}`);
+}
+
+/** Проверки портального режима: пары врат, позиции, свободные подступы. */
+function checkPortals(L, seed) {
+  const byId = new Map(L.rooms.map((r) => [r.id, r]));
+  const perLink = new Map();
+  for (const p of L.portals) perLink.set(p.linkIdx, (perLink.get(p.linkIdx) || 0) + 1);
+  // Каждый линк графа — ровно пара врат.
+  ok(`seed ${seed}: every link has 2 portals`,
+    L.links.every((l, i) => perLink.get(i) === 2),
+    `[${L.links.map((l, i) => `${l.a}-${l.b}:${perLink.get(i) || 0}`).join(' ')}]`);
+  // Врата внутри своей комнаты, с отступом от стен, не в препятствии и не в центре.
+  const bad = [];
+  for (const p of L.portals) {
+    const host = byId.get(p.roomId);
+    if (!host) { bad.push(`p${p.id} no room`); continue; }
+    if (p.x < host.x + PORTAL.inset - 40 || p.x > host.x + host.w - PORTAL.inset + 40 ||
+        p.y < host.y + PORTAL.inset - 40 || p.y > host.y + host.h - PORTAL.inset + 40) bad.push(`p${p.id} at wall`);
+    if (host.obstacles.some((b) => pointInRect(p.x, p.y, b, 10))) bad.push(`p${p.id} in obstacle`);
+    if (Math.hypot(p.x - host.cx, p.y - host.cy) < 100) bad.push(`p${p.id} at center`);
+  }
+  ok(`seed ${seed}: portals placed clean`, bad.length === 0, bad.join(' '));
+  // Пары врат одного линка лежат в двух концах этого линка.
+  const pairBad = [];
+  L.links.forEach((l, i) => {
+    const pair = L.portals.filter((p) => p.linkIdx === i);
+    const rooms = pair.map((p) => p.roomId).sort((a, b) => a - b).join('-');
+    if (rooms !== [l.a, l.b].sort((a, b) => a - b).join('-')) pairBad.push(`link ${l.a}-${l.b} -> ${rooms}`);
+  });
+  ok(`seed ${seed}: portal pairs span their link`, pairBad.length === 0, pairBad.join(' '));
+  // Врата разнесены внутри комнаты.
+  const sepBad = [];
+  const byRoom = new Map();
+  for (const p of L.portals) {
+    const got = byRoom.get(p.roomId) || [];
+    byRoom.set(p.roomId, got);
+    for (const q of got) {
+      if (Math.hypot(p.x - q.x, p.y - q.y) < PORTAL.minSeparation * 0.6) sepBad.push(`room ${p.roomId}`);
+    }
+    got.push(p);
+  }
+  ok(`seed ${seed}: portals separated in room`, sepBad.length === 0, sepBad.join(' '));
+  // Подступы к вратам свободны: нет блоков и точек появления врагов рядом.
+  const approachBad = [];
+  for (const p of L.portals) {
+    const host = byId.get(p.roomId);
+    for (const b of host.obstacles) {
+      const cx = Math.max(b.x, Math.min(p.x, b.x + b.w));
+      const cy = Math.max(b.y, Math.min(p.y, b.y + b.h));
+      if (Math.hypot(p.x - cx, p.y - cy) < PORTAL.clearance * 0.6) approachBad.push(`p${p.id}`);
+    }
+    for (const s of host.spawns) {
+      if (Math.hypot(p.x - s.x, p.y - s.y) < PORTAL.clearance) approachBad.push(`spawn@${p.id}`);
+    }
+  }
+  ok(`seed ${seed}: portal approaches clear`, approachBad.length === 0, approachBad.join(' '));
+  // Тоннелей и дверей в этом режиме нет вообще.
+  ok(`seed ${seed}: no tunnels/doors in portal mode`,
+    L.corridors.length === 0 && L.rooms.every((r) => r.doors.length === 0 &&
+      r.gaps.N.length + r.gaps.S.length + r.gaps.W.length + r.gaps.E.length === 0));
+}
+
+for (const seed of [1, 7, 42, 4242, 1337, 2026, 99999]) {
+  const L = generateLayout(seed, OPTS);
+  const HW = 60, T = 24;
+
+  checkCommon(L, seed);
 
   const inSolid = (x, y) => L.solids.some((s) => pointInRect(x, y, s, 0));
   const inFloor = (x, y) => L.floors.some((f) => pointInRect(x, y, f, 0));
@@ -109,6 +178,12 @@ for (const seed of [1, 7, 42, 4242, 1337, 2026, 99999]) {
     }
   }
   ok(`seed ${seed}: door mouths walkable`, doorsBad.length === 0, doorsBad.join(' '));
+  ok(`seed ${seed}/tunnels: no portals`, (L.portals || []).length === 0);
+
+  // Режим 2: врата-порталы вместо тоннелей.
+  const P = generateLayout(seed, { ...OPTS, withTunnels: false });
+  checkCommon(P, `${seed}/portals`);
+  checkPortals(P, `${seed}/portals`);
 }
 
 const A = JSON.stringify(generateLayout(4242).rooms);
