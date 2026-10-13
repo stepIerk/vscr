@@ -84,7 +84,7 @@ export class Minimap {
     const key =
       layout.rooms.map((r) => (r.cleared ? 2 : r.visited ? 1 : 0)).join('') +
       '|' + currentId + '|' + layout.rooms.length +
-      '|' + layout.rooms.map((r) => (r.type === 'shop' ? 1 : 0)).join('') +
+      '|' + layout.rooms.map((r) => (r.type === 'boss' ? 2 : r.type === 'shop' ? 1 : 0)).join('') +
       '|' + (layout.withTunnels === false ? 'p' : 't') + (layout.portals || []).length +
       '|' + Math.round(px / 40) + ',' + Math.round(py / 40);
     if (now - this.last < 300 && key === this.lastKey) return;
@@ -130,10 +130,11 @@ export class Minimap {
       if (!vis.has(rm.id)) continue; // fog: unexplored far rooms stay black
       const [x, y, w, h] = this.rect(rm, v);
       const explored = rm.visited || rm.cleared;
-      // Тип лавки раскрываем только после исследования — сосед в тумане
+      // Тип лавки/босса раскрываем только после исследования — сосед в тумане
       // рисуется как обычная комната, иначе метка палит неисследованное.
       const shopKnown = rm.type === 'shop' && explored;
-      g.fillStyle = !explored ? '#332027' : shopKnown ? '#6b5320' : rm.cleared ? '#5a4a52' : '#7a3542';
+      const bossKnown = rm.type === 'boss' && explored;
+      g.fillStyle = !explored ? '#332027' : bossKnown ? '#5e1f4d' : shopKnown ? '#6b5320' : rm.cleared ? '#5a4a52' : '#7a3542';
       g.fillRect(x, y, w, h);
       if (rm.cleared) {
         g.strokeStyle = '#9dffb0';
@@ -149,6 +150,18 @@ export class Minimap {
         g.arc(cx, cy, 3, 0, Math.PI * 2);
         g.fill();
         g.strokeStyle = '#ffd94d';
+        g.lineWidth = 1.5;
+        g.strokeRect(x, y, w, h);
+      }
+      if (bossKnown) {
+        // Метка босса — видна только после визита (как лавка).
+        g.fillStyle = '#ff2d78';
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        g.beginPath();
+        g.arc(cx, cy, 3.5, 0, Math.PI * 2);
+        g.fill();
+        g.strokeStyle = '#ff2d78';
         g.lineWidth = 1.5;
         g.strokeRect(x, y, w, h);
       }

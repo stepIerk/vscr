@@ -70,7 +70,8 @@ body {
   font-size: 11px;
   letter-spacing: 0.12em;
   color: var(--dim);
-  width: 44px;
+  width: 62px;
+  flex-shrink: 0;
 }
 
 .hud-value {
@@ -582,6 +583,334 @@ body {
   }
 }
 
+/* ------------------------------------------------- colony cards + merge */
+
+.colony-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.cell-img {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: rgba(64, 224, 208, 0.06);
+  border: 1px solid rgba(64, 224, 208, 0.25);
+}
+
+.cell-img.img-missing {
+  background: radial-gradient(circle, rgba(64, 224, 208, 0.35) 30%, transparent 70%);
+}
+
+.cell-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.colony-card.merge-ok {
+  border-color: rgba(157, 255, 176, 0.75);
+  box-shadow: 0 0 10px rgba(157, 255, 176, 0.18) inset;
+}
+
+.colony-card.merge-no {
+  opacity: 0.55;
+}
+
+.merge-hint-ok {
+  font-size: 12px;
+  font-weight: 700;
+  color: #9dffb0;
+}
+
+.merge-hint-no {
+  font-size: 12px;
+  color: #ff8f9d;
+}
+
+.merge-hint-dim {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* ------------------------------------------------- artifact slots */
+
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.slot-cell {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 76px;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+button.slot-cell {
+  cursor: pointer;
+}
+
+button.slot-cell:hover {
+  border-color: var(--accent);
+}
+
+.slot-cell.filled {
+  border-color: rgba(255, 122, 218, 0.55);
+}
+
+.slot-cell.empty {
+  justify-content: center;
+  color: var(--dim);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  border-style: dashed;
+  background: transparent;
+}
+
+.slot-icon {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.slot-info {
+  min-width: 0;
+}
+
+/* ------------------------------------------------- colony side panel */
+
+.colony-side {
+  position: absolute;
+  left: 14px;
+  top: 268px;
+  width: 218px;
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  user-select: none;
+  z-index: 5;
+}
+
+.colony-side.hidden {
+  display: none;
+}
+
+.side-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 2px 4px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.side-hero-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.side-hero-xp {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.side-note {
+  font-size: 11px;
+  color: var(--dim);
+  padding: 2px 4px;
+}
+
+.side-cell {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 6px;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.side-cell:hover {
+  border-color: var(--accent);
+}
+
+.side-cell-img {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: rgba(64, 224, 208, 0.06);
+}
+
+.side-cell-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.side-cell-name {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.side-hp-track {
+  height: 5px;
+  margin: 3px 0;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.side-hp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2c7a4b, #9dffb0);
+}
+
+.side-cell-sub {
+  font-size: 11px;
+  color: var(--text);
+}
+
+.side-cell-sub.dim {
+  color: var(--dim);
+}
+
+/* ------------------------------------------------- touch controls */
+
+#game-container,
+#game-container canvas {
+  touch-action: none;
+}
+
+.touch-ui {
+  position: absolute;
+  inset: auto 0 0 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.touch-ui.hidden {
+  display: none;
+}
+
+.joy {
+  position: absolute;
+  left: 22px;
+  bottom: 26px;
+  width: 118px;
+  height: 118px;
+  border: 2px solid rgba(64, 224, 208, 0.35);
+  border-radius: 50%;
+  background: rgba(8, 14, 18, 0.35);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.joy-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  border-radius: 50%;
+  background: rgba(64, 224, 208, 0.35);
+  border: 2px solid rgba(64, 224, 208, 0.55);
+}
+
+.act-btn {
+  position: absolute;
+  right: 26px;
+  bottom: 40px;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  background: rgba(255, 217, 77, 0.16);
+  border: 2px solid rgba(255, 217, 77, 0.5);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.act-btn:active {
+  background: rgba(255, 217, 77, 0.35);
+}
+
+/* ------------------------------------------------- small screens */
+
+@media (max-width: 760px) {
+  .hud {
+    min-width: 0;
+    width: 196px;
+    padding: 8px 10px;
+  }
+
+  .hud-label {
+    width: 52px;
+    font-size: 10px;
+  }
+
+  .hud-hint {
+    display: none;
+  }
+
+  .colony-side {
+    top: auto;
+    bottom: 160px;
+    width: 172px;
+    max-height: 38vh;
+  }
+
+  .side-cell-sub.dim {
+    display: none;
+  }
+
+  #minimap {
+    width: 128px;
+    height: 128px;
+  }
+
+  .panel {
+    padding: 14px;
+  }
+
+  .cell-img {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* ---------------------------------------------------------- minimap */
 
 #minimap-wrap {
@@ -608,6 +937,51 @@ body {
     width: 128px;
     height: 128px;
   }
+}
+
+/* ---------------------------------------------------------- boss hp bar */
+
+.boss-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, 60vw);
+  padding: 8px 14px 10px;
+  background: rgba(20, 6, 12, 0.88);
+  border: 1px solid rgba(255, 45, 120, 0.5);
+  border-radius: 8px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 12;
+}
+
+.boss-bar.hidden {
+  display: none;
+}
+
+.boss-name {
+  margin-bottom: 5px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-align: center;
+  color: #ff7ab0;
+}
+
+.boss-track {
+  height: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 45, 120, 0.45);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.boss-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #8f1d4d, #ff2d78);
+  transition: width 0.15s linear;
 }
 
 /* ------------------------------------------------------------- toast */

@@ -14,12 +14,12 @@ function cellCard(type) {
     id: `cell-${type}`,
     kind: 'cell',
     cellType: type,
-    title: `${t.name} cell`,
-    tag: 'New cell',
+    title: `Клетка: ${t.name}`,
+    tag: 'Новая клетка',
     desc: t.role,
     lines: [
-      `ATK ${t.attack} · ${Math.round(1000 / t.attackIntervalMs * 10) / 10}/s`,
-      `HP ${t.maxHealth} · SPD ${t.moveSpeed}`
+      `АТК ${t.attack} · ${Math.round(1000 / t.attackIntervalMs * 10) / 10}/с`,
+      `ЗДР ${t.maxHealth} · СКР ${t.moveSpeed}`
     ]
   };
 }
@@ -31,8 +31,8 @@ function mutationCard(key) {
     kind: 'mutation',
     mutation: key,
     title: m.name,
-    tag: 'Mutation',
-    desc: `${m.desc}. Applies to hero and/or one cell. Re-pick raises its level.`
+    tag: 'Мутация',
+    desc: `${m.desc}. Действует на героя и/или одну клетку. Повторный выбор растит уровень.`
   };
 }
 
@@ -43,7 +43,7 @@ function upgradeCard(key) {
     kind: 'upgrade',
     upgrade: key,
     title: u.name,
-    tag: u.target === 'hero' ? 'Hero upgrade' : u.target === 'colony' ? 'Colony upgrade' : 'Upgrade',
+    tag: u.target === 'hero' ? 'Улучшение героя' : u.target === 'colony' ? 'Улучшение колонии' : 'Улучшение',
     desc: u.desc
   };
 }
@@ -69,20 +69,20 @@ export const CARD_BY_ID = Object.fromEntries(CARDS.map((c) => [c.id, c]));
 export function describeCard(card, run) {
   if (card.kind === 'cell') {
     const left = run.freeCellSlots();
-    return { ...card, levelLine: `Active cells: ${run.cells.length}/${run.maxCells} · free: ${left}` };
+    return { ...card, levelLine: `Клеток: ${run.cells.length}/${run.maxCells} · свободно: ${left}` };
   }
   if (card.kind === 'mutation') {
     const heroLvl = run.mutationLevel('hero', card.mutation);
     const maxed = run.mutationMaxedEverywhere(card.mutation);
     return {
       ...card,
-      levelLine: `Hero: ${heroLvl > 0 ? `Lv ${heroLvl}` : '—'}${maxed ? ' · all targets maxed' : ''}`
+      levelLine: `Герой: ${heroLvl > 0 ? `ур. ${heroLvl}` : '—'}${maxed ? ' · везде максимум' : ''}`
     };
   }
   const lvl = run.upgradeLevel(card.upgrade);
   const max = UPGRADES[card.upgrade].maxLevel;
   return {
     ...card,
-    levelLine: lvl > 0 ? `Lv ${lvl} → Lv ${Math.min(lvl + 1, max)}` : `New · max Lv ${max}`
+    levelLine: lvl > 0 ? `Ур. ${lvl} → ур. ${Math.min(lvl + 1, max)}` : `Новое · макс. ур. ${max}`
   };
 }

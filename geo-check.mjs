@@ -1,5 +1,5 @@
 import { generateLayout, pointInRect } from './src/world/generator.js';
-import { DUNGEON, SHOP, PORTAL } from './src/config.js';
+import { DUNGEON, SHOP, PORTAL, BOSS } from './src/config.js';
 
 // Тест генерирует мир теми же параметрами, что и сцена.
 const OPTS = {
@@ -24,12 +24,24 @@ const ok = (name, cond, extra = '') => {
 /** Общие проверки: комнаты, типы, лавки, спавны (не зависят от режима карты). */
 function checkCommon(L, seed) {
   ok(`seed ${seed}: no layout issues`, L.issues.length === 0, JSON.stringify(L.issues));
-  ok(`seed ${seed}: 12-18 rooms`, L.rooms.length >= 12 && L.rooms.length <= 18, `${L.rooms.length}`);
+  const bosses = L.rooms.filter((r) => r.type === 'boss');
+  const base = L.rooms.filter((r) => !r.isBoss);
+  ok(`seed ${seed}: ${DUNGEON.roomCountMin}-${DUNGEON.roomCountMax} base rooms + 1 boss`,
+    base.length >= DUNGEON.roomCountMin && base.length <= DUNGEON.roomCountMax && bosses.length === 1,
+    `${base.length}+${bosses.length}`);
   // Стартовая комната может быть немного меньше обычной (startRoomMin).
-  const nonStartR = L.rooms.filter((r) => !r.isStart);
+  const nonStartR = base.filter((r) => !r.isStart);
   ok(`seed ${seed}: room sizes ${DUNGEON.roomMin}-${DUNGEON.roomMax}`,
     nonStartR.every((r) => r.w >= DUNGEON.roomMin && r.w <= DUNGEON.roomMax && r.h >= DUNGEON.roomMin && r.h <= DUNGEON.roomMax),
-    `[${L.rooms.map((r) => Math.round(r.w)).join(',')}]`);
+    `[${base.map((r) => Math.round(r.w)).join(',')}]`);
+  // Босс-зал: большой, пустой, висячий лист графа (один линк наружу).
+  const bossOk = bosses.length === 1 &&
+    bosses[0].w >= BOSS.roomMin && bosses[0].w <= BOSS.roomMax &&
+    bosses[0].h >= BOSS.roomMin && bosses[0].h <= BOSS.roomMax &&
+    bosses[0].obstacles.length === 0 && bosses[0].spawns.length === 0 &&
+    L.links.filter((l) => l.a === bosses[0].id || l.b === bosses[0].id).length === 1;
+  ok(`seed ${seed}: boss hall big+empty+leaf`, bossOk,
+    bosses.length ? `${Math.round(bosses[0].w)}x${Math.round(bosses[0].h)} obst=${bosses[0].obstacles.length} sp=${bosses[0].spawns.length}` : 'no boss');
   ok(`seed ${seed}: start room typed combat`, L.rooms[0].type === 'combat' && L.rooms[0].spawns.length === 0);
   const fighting = nonStartR.filter((r) => r.type !== 'shop'); // лавки без спавнов
   ok(`seed ${seed}: 3-9 spawns in fighting rooms`, fighting.every((r) => r.spawns.length >= 3 && r.spawns.length <= 9),

@@ -90,12 +90,12 @@ export class RunState {
 
   /** Compatibility check with a human reason (shown in the colony UI). */
   mergeCheck(a, b) {
-    if (!a || !b) return { ok: false, reason: 'Select two cells.' };
-    if (a.id === b.id) return { ok: false, reason: 'Select two different cells.' };
-    if (a.type !== b.type) return { ok: false, reason: 'Only cells of the same type merge.' };
-    if (a.merge !== b.merge) return { ok: false, reason: 'Only cells of the same merge level merge.' };
-    if (a.merge >= ALLIES.maxMerge) return { ok: false, reason: `Merge level ${ALLIES.maxMerge} is the maximum.` };
-    if (!RunState.sameMutations(a, b)) return { ok: false, reason: 'Mutation sets differ — merge would lose properties.' };
+    if (!a || !b) return { ok: false, reason: 'Выбери две клетки.' };
+    if (a.id === b.id) return { ok: false, reason: 'Нужны две разные клетки.' };
+    if (a.type !== b.type) return { ok: false, reason: 'Только клетки одного вида.' };
+    if (a.merge !== b.merge) return { ok: false, reason: 'Только клетки одного уровня слияния.' };
+    if (a.merge >= ALLIES.maxMerge) return { ok: false, reason: `Уровень ${ALLIES.maxMerge} — максимальный.` };
+    if (!RunState.sameMutations(a, b)) return { ok: false, reason: 'Разные наборы мутаций — слияние потеряет свойства.' };
     return { ok: true, reason: '' };
   }
 

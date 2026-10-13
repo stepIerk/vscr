@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import {
   COLORS, DUNGEON, PLAYER, HERO_BASE, ENEMIES, ENEMY_LEVEL, SPAWNS, RESOURCE, WEAPON,
   ALLIES, ALLY_TYPES, MUTATIONS, PLASMA, SHOP, ARTIFACTS, ARTIFACT_CATALOG, UPGRADES,
-  GROWTHS, ARENA, PORTAL, pickEnemyType, resolveSeed, resolveWithTunnels
+  GROWTHS, ARENA, PORTAL, BOSS, TOUCH, pickEnemyType, resolveSeed, resolveWithTunnels
 } from '../config.js';
 import { generateLayout, generateWing, roomDegrees } from '../world/generator.js';
 import { WorldBuilder } from '../world/WorldBuilder.js';
@@ -17,6 +17,8 @@ import { ui } from '../ui.js';
 import { Minimap } from '../ui/minimap.js';
 import * as panels from '../ui/progression.js';
 import { mulberry32 } from '../world/rng.js';
+import { slideVelocity } from '../world/organic.js';
+import { isTouchDevice, initTouch } from '../ui/touch.js';
 
 /**
  * Main gameplay scene (procedural tissue dungeon).
@@ -49,12 +51,30 @@ const TEX = {
   'enemy-a': 'enemy-a',
   'enemy-b': 'enemy-b',
   'enemy-c': 'enemy-c',
+  'boss-0': 'boss-0',
+  'boss-1': 'boss-1',
+  foe: 'foe',
   'cell-hunter': 'cell-hunter',
   'cell-defender': 'cell-defender',
-  'cell-parasite': 'cell-parasite'
+  'cell-parasite': 'cell-parasite',
+  'cell-hunter-1': 'cell-hunter-1',
+  'cell-hunter-2': 'cell-hunter-2',
+  'cell-hunter-3': 'cell-hunter-3',
+  'cell-defender-1': 'cell-defender-1',
+  'cell-defender-2': 'cell-defender-2',
+  'cell-defender-3': 'cell-defender-3',
+  'cell-parasite-1': 'cell-parasite-1',
+  'cell-parasite-2': 'cell-parasite-2',
+  'cell-parasite-3': 'cell-parasite-3'
 };
 
-const TEX_SIZE = { dot: 8, player: 40, shell: 56, bullet: 16, mote: 20, plasma: 24, growth: 48, stand: 64, coin: 20, relic: 28, tonic: 24, portal: 56, 'enemy-a': 32, 'enemy-b': 36, 'enemy-c': 48, 'cell-hunter': 28, 'cell-defender': 36, 'cell-parasite': 24 };
+const TEX_SIZE = { dot: 8, player: 40, shell: 56, bullet: 16, foe: 20, mote: 20, plasma: 24, growth: 48, stand: 64, coin: 20, relic: 28, tonic: 24, portal: 56, 'enemy-a': 32, 'enemy-b': 36, 'enemy-c': 48, 'boss-0': 96, 'boss-1': 96, 'cell-hunter': 28, 'cell-defender': 36, 'cell-parasite': 24, 'cell-hunter-1': 28, 'cell-hunter-2': 28, 'cell-hunter-3': 28, 'cell-defender-1': 36, 'cell-defender-2': 36, 'cell-defender-3': 36, 'cell-parasite-1': 24, 'cell-parasite-2': 24, 'cell-parasite-3': 24 };
+
+/** Текстура клетки по виду и уровню слияния (уровни сложнее с каждым). */
+function allyTexKey(type, merge) {
+  const lv = Math.max(1, Math.min(3, merge || 1));
+  return `cell-${type}-${lv}`;
+}
 
 const MERGE_BADGE = ['I', 'II', 'III', 'IV', 'V'];
 
@@ -220,21 +240,38 @@ function ensureTextures(scene) {
     g.fillRect(c - 5, c - 2, 10, 3);
   });
 
-  // Portal: белая основа-«мембрана», красится тинтом в цвет пары врат.
+  // Portal: венозная дыра в плоти — мясистый валик, тёмная глубина внутри.
+  // Базовые цвета — как у окружающих внутренностей, тинтом НЕ красится:
+  // цвет пары живёт только на тонком кольце-жиле (см. spawnPortalView).
   if (!scene.textures.exists(TEX.portal)) {
     const s = TEX_SIZE.portal;
     const g = scene.add.graphics();
     const c = s / 2;
-    g.fillStyle(0xffffff, 0.22);
+    // Мягкий ореол плоти вокруг дыры.
+    g.fillStyle(COLORS.vein, 0.28);
     g.fillCircle(c, c, 26);
-    g.fillStyle(0xffffff, 0.85);
-    g.fillCircle(c, c, 20);
-    g.fillStyle(0x0a0507, 1);
-    g.fillCircle(c, c, 13);
-    g.fillStyle(0xffffff, 1);
+    // Мясистый валик: тёмная плоть → светлее к краю.
+    g.fillStyle(COLORS.flesh, 1);
+    g.fillCircle(c, c, 22);
+    g.fillStyle(COLORS.fleshLight, 1);
+    g.fillCircle(c, c, 19);
+    g.fillStyle(COLORS.flesh, 1);
+    g.fillCircle(c, c, 16);
+    // Глубина: тёмный зев → почти чёрное дно.
+    g.fillStyle(COLORS.hole, 1);
+    g.fillCircle(c, c, 14);
+    g.fillStyle(COLORS.holeDeep, 1);
     g.fillCircle(c, c, 10);
-    g.lineStyle(2, 0xffffff, 0.9);
-    g.strokeCircle(c, c, 24);
+    // Узелки ткани на валике (асимметрия живого).
+    g.fillStyle(COLORS.wallHighlight, 0.85);
+    g.fillCircle(c - 11, c - 8, 3);
+    g.fillCircle(c + 12, c + 4, 2.5);
+    g.fillCircle(c + 2, c + 13, 2);
+    g.fillStyle(COLORS.wallCrevice, 0.8);
+    g.fillCircle(c + 9, c - 11, 2.5);
+    // Тонкая кромка валика.
+    g.lineStyle(2, COLORS.wallEdge, 0.55);
+    g.strokeCircle(c, c, 21);
     g.generateTexture(TEX.portal, s, s);
     g.destroy();
   }
@@ -287,23 +324,93 @@ function ensureTextures(scene) {
     g.destroy();
   }
 
-  // Friendly cells: distinct silhouettes, never red (enemies stay red).
-  if (!scene.textures.exists(TEX['cell-hunter'])) {
-    const s = TEX_SIZE['cell-hunter'];
+  // Bosses: big fleshy maws in def tints (looks are placeholder — separate pass).
+  BOSS.defs.forEach((def, i) => {
+    const key = TEX[`boss-${i}`];
+    if (!key || scene.textures.exists(key)) return;
+    const s = TEX_SIZE[key] || 96;
     const g = scene.add.graphics();
+    const c = s / 2;
+    const R = s / 2 - 4;
+    g.fillStyle(def.tint, 0.3);
+    g.fillCircle(c, c, R);
+    g.fillStyle(def.tint, 1);
+    g.fillCircle(c, c, R - 8);
+    g.fillStyle(0x1a080c, 1);
+    g.fillCircle(c, c, R - 20);
+    g.fillStyle(0x000000, 1);
+    g.fillCircle(c, c, R - 30);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(c - 6, c - 8, 5);
+    g.lineStyle(3, 0xffffff, 0.7);
+    g.strokeCircle(c, c, R - 8);
+    // Spikes around the maw so it reads as boss, not enemy-c.
+    g.lineStyle(4, def.tint, 1);
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + 0.2;
+      g.lineBetween(c + Math.cos(a) * (R - 4), c + Math.sin(a) * (R - 4),
+        c + Math.cos(a) * R, c + Math.sin(a) * R);
+    }
+    g.generateTexture(key, s, s);
+    g.destroy();
+  });
+
+  // Enemy bullet (boss bullet-hell): hot magenta orb, distinct from hero shot.
+  makeCircleTexture(scene, TEX.foe, TEX_SIZE.foe, (g, s) => {
+    const c = s / 2;
+    g.fillStyle(0xff2d78, 0.35);
+    g.fillCircle(c, c, 9);
+    g.fillStyle(0xff2d78, 1);
+    g.fillCircle(c, c, BOSS.foeRadius);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(c, c, 2.5);
+  });
+
+  // Friendly cells: distinct silhouettes, never red (enemies stay red).
+  // Каждый уровень слияния чуть сложнее: кольца, шипы, яркое ядро.
+  for (const type of ['hunter', 'defender', 'parasite']) {
+    for (let lv = 1; lv <= 3; lv++) {
+      const key = TEX[`cell-${type}-${lv}`];
+      if (!key || scene.textures.exists(key)) continue;
+      const s = TEX_SIZE[key];
+      const g = scene.add.graphics();
+      drawAllyCell(g, s, type, lv);
+      g.generateTexture(key, s, s);
+      g.destroy();
+    }
+  }
+}
+
+function drawAllyCell(g, s, type, lv) {
+  const c = s / 2;
+  if (type === 'hunter') {
     g.fillStyle(ALLY_TYPES.hunter.tint, 1); // cyan dart
     g.fillTriangle(s / 2, 2, s - 2, s - 2, 2, s - 2);
     g.lineStyle(1.5, 0xffffff, 0.6);
     g.strokeTriangle(s / 2, 2, s - 3, s - 3, 3, s - 3);
     g.fillStyle(0x06232b, 1);
     g.fillCircle(s / 2, s / 2 + 4, 4);
-    g.generateTexture(TEX['cell-hunter'], s, s);
-    g.destroy();
-  }
-  if (!scene.textures.exists(TEX['cell-defender'])) {
-    const s = TEX_SIZE['cell-defender'];
-    const g = scene.add.graphics();
-    const c = s / 2;
+    if (lv >= 2) {
+      // Боковые зазубрины + внутреннее ядро.
+      g.lineStyle(2, 0xffffff, 0.75);
+      g.lineBetween(6, s - 8, 11, s - 6);
+      g.lineBetween(s - 6, s - 8, s - 11, s - 6);
+      g.fillStyle(0xffffff, 0.9);
+      g.fillCircle(s / 2, s / 2 + 4, 2);
+    }
+    if (lv >= 3) {
+      // Пунктирное кольцо + яркое ядро.
+      g.fillStyle(0xffffff, 0.9);
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        g.fillCircle(c + Math.cos(a) * (c - 2), c + Math.sin(a) * (c - 2), 1.4);
+      }
+      g.fillStyle(0x06232b, 1);
+      g.fillCircle(s / 2, s / 2 + 4, 5);
+      g.fillStyle(0x9df3ff, 1);
+      g.fillCircle(s / 2, s / 2 + 4, 2.5);
+    }
+  } else if (type === 'defender') {
     const r = s / 2 - 2;
     const pts = [];
     for (let i = 0; i < 6; i++) {
@@ -316,13 +423,23 @@ function ensureTextures(scene) {
     g.strokePoints(pts, true);
     g.lineStyle(2, 0x06231c, 0.9);
     g.strokeCircle(c, c, r * 0.55);
-    g.generateTexture(TEX['cell-defender'], s, s);
-    g.destroy();
-  }
-  if (!scene.textures.exists(TEX['cell-parasite'])) {
-    const s = TEX_SIZE['cell-parasite'];
-    const g = scene.add.graphics();
-    const c = s / 2;
+    if (lv >= 2) {
+      // Точки по углам + второе кольцо.
+      g.fillStyle(0xffffff, 0.85);
+      for (const p of pts) g.fillCircle(p.x, p.y, 1.8);
+      g.lineStyle(1.5, 0x06231c, 0.9);
+      g.strokeCircle(c, c, r * 0.8);
+    }
+    if (lv >= 3) {
+      // Наружное кольцо + светящееся ядро.
+      g.lineStyle(2, 0xffffff, 0.8);
+      g.strokeCircle(c, c, r + 0.5 > s / 2 - 0.5 ? s / 2 - 0.5 : r + 0.5);
+      g.fillStyle(0x06231c, 1);
+      g.fillCircle(c, c, 5);
+      g.fillStyle(0xb8ffd9, 1);
+      g.fillCircle(c, c, 2.4);
+    }
+  } else {
     g.fillStyle(ALLY_TYPES.parasite.tint, 1); // small lime node with tail
     g.fillCircle(c, c - 2, 7);
     g.lineStyle(2, ALLY_TYPES.parasite.tint, 0.9);
@@ -330,8 +447,25 @@ function ensureTextures(scene) {
     g.lineBetween(c + 4, c + 4, c + 7, c + 10);
     g.fillStyle(0xffffff, 1);
     g.fillCircle(c, c - 2, 2.2);
-    g.generateTexture(TEX['cell-parasite'], s, s);
-    g.destroy();
+    if (lv >= 2) {
+      // Кольцо вокруг узла + третий хвост.
+      g.lineStyle(1.5, 0xffffff, 0.7);
+      g.strokeCircle(c, c - 2, 9.5);
+      g.lineStyle(2, ALLY_TYPES.parasite.tint, 0.9);
+      g.lineBetween(c, c + 5, c, c + 11);
+    }
+    if (lv >= 3) {
+      // Корона из узелков + яркое ядро.
+      g.fillStyle(0xffffff, 0.9);
+      for (let k = 0; k < 6; k++) {
+        const a = -Math.PI / 2 + (k / 6) * Math.PI * 2;
+        g.fillCircle(c + Math.cos(a) * 10.5, c - 2 + Math.sin(a) * 10.5, 1.6);
+      }
+      g.fillStyle(0x33470a, 1);
+      g.fillCircle(c, c - 2, 4.5);
+      g.fillStyle(0xeaffb0, 1);
+      g.fillCircle(c, c - 2, 2);
+    }
   }
 }
 
@@ -365,12 +499,32 @@ export class GameScene extends Phaser.Scene {
     this.lastHudLevel = -1;
     this.lastHudXp = -1;
     this.shellAngle = 0;
-    this.markers = []; // pending spawn telegraphs {view, timer}
+    this.markers = []; // pending spawn telegraphs {view, timer, roomId}
+    this.joyVec = { x: 0, y: 0 }; // virtual stick (touch); consumed in updateMovement
+    this.stashedCells = []; // colony hidden for boss fights (data kept, views gone)
+    this.bossActive = null; // roomId of the running boss fight (null = none)
     this.retryAcc = 0;
     this.expandAcc = 0;
     this.wingCount = 0;
     this.expandRetryAt = 0;
     this.currentRoom = null;
+  }
+
+  /** Phaser-текстура → dataURL для DOM-панелей (с кешем, дёшево). */
+  texDataURL(key) {
+    if (!this._texURL) this._texURL = new Map();
+    if (this._texURL.has(key)) return this._texURL.get(key);
+    let url = null;
+    try {
+      const t = this.textures && this.textures.get ? this.textures.get(key) : null;
+      const src = t && t.getSourceImage ? t.getSourceImage() : null;
+      const cv = src && src.canvas ? src.canvas : src;
+      if (cv && cv.toDataURL) url = cv.toDataURL();
+    } catch {
+      url = null;
+    }
+    this._texURL.set(key, url);
+    return url;
   }
 
   /** Computed hero stats, cached until a card/merge dirties them. */
@@ -435,6 +589,7 @@ export class GameScene extends Phaser.Scene {
     // --- Groups (bounded; no accumulation) ---
     this.enemies = this.physics.add.group();
     this.bullets = this.physics.add.group({ maxSize: WEAPON.bulletPoolMax });
+    this.foeShots = this.physics.add.group(); // вражеские снаряды боссов (bullet-hell)
     this.resources = this.physics.add.group();
     this.plasma = this.physics.add.group(); // вторая валюта
     this.growths = this.physics.add.group(); // разрушаемые наросты (не блокируют)
@@ -507,6 +662,16 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 0.09, 0.09);
     this.cameras.main.setBackgroundColor('#0a0507');
 
+    // --- Touch: subtle stick + action key; map focus lifts above the stick ---
+    if (isTouchDevice()) {
+      initTouch({
+        onMove: (x, y) => { this.joyVec.x = x; this.joyVec.y = y; },
+        onAction: () => this.tryBuyNearStand()
+      });
+      // Фокус камеры ниже героя → герой выше центра, джойстик не кроет бой.
+      this.cameras.main.setFollowOffset(0, TOUCH.followOffsetY);
+    }
+
     // --- Input (created once per scene run; auto-cleaned on shutdown) ---
     this.cursors = this.input.keyboard ? this.input.keyboard.createCursorKeys() : null;
     this.wasd = this.input.keyboard
@@ -540,8 +705,14 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.bullets, this.growths, this.onBulletGrowth, null, this);
     // Врата — overlap-триггер: вход в зону телепортирует игрока и колонию.
     this.physics.add.overlap(this.player, this.portalGroup, this.onPortalTouch, null, this);
+    // Снаряды боссов: гасят о стены/барьеры, бьют героя и колонию.
+    this.physics.add.collider(this.foeShots, this.worldApi.bodies, this.onFoeShotWall, null, this);
+    this.physics.add.collider(this.foeShots, this.arenaBarriers, this.onFoeShotWall, null, this);
+    this.physics.add.overlap(this.player, this.foeShots, this.onFoeShotPlayer, null, this);
+    this.physics.add.overlap(this.allies, this.foeShots, this.onFoeShotAlly, null, this);
     this.fireAcc = this.heroStats().intervalMs; // first shot ready immediately
     this.spawnAllPortals();
+    this.refreshColonySide();
   }
 
   // ----------------------------------------------------------------- update
@@ -550,6 +721,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isGameOver || !this.player || !this.player.active) return;
     const dt = Math.min(delta, 100); // clamp tab-switch spikes
     this.elapsedMs += dt;
+    this.frameDt = dt;
 
     // Safety net BEFORE new input applies: positions are post-physics here.
     // Arcade skips separation when overlap exceeds one step's motion + bias
@@ -558,12 +730,15 @@ export class GameScene extends Phaser.Scene {
     // deterministically so a pass-through can never accumulate.
     this.resolveEmbeddings();
     this.updateMovement();
+    this.slideAlongTissue(this.player, PLAYER.bodyRadius * 0.85);
     this.updateRooms(dt);
     this.updateWeapon(dt);
     this.updateEnemies(dt);
+    this.updateBosses(dt);
     this.resolveEnemyEmbeddings();
     this.updateAllies(dt);
     this.updateBullets(dt);
+    this.updateFoeShots(dt);
     this.updatePickups();
     this.applyRegen(dt);
     this.updateShell(dt);
@@ -574,6 +749,12 @@ export class GameScene extends Phaser.Scene {
     if (this.minimapAcc >= 300) {
       this.minimapAcc = 0;
       this.minimap.update(this.player.x, this.player.y, this.layout, this.currentRoom ? this.currentRoom.id : null);
+    }
+    // Сайд-панель колонии: HP дрейфует в бою — подтягиваем не чаще 0.8с.
+    this.sideAcc = (this.sideAcc || 0) + dt;
+    if (this.sideAcc >= 800) {
+      this.sideAcc = 0;
+      if (!this.modalOpen) this.refreshColonySide();
     }
     this.pushHud();
   }
@@ -594,7 +775,10 @@ export class GameScene extends Phaser.Scene {
   pushOutOfSolids(gameObject, bodyRadius) {
     const r = bodyRadius;
     const minDim = r * 2 - 4; // ~20px: thinner fragments are straddled, not embedded
-    const solids = this.layout.solids;
+    // Портальный режим: стен-тел нет, твёрдые только наросты-препятствия.
+    const solids = this.portalMode && this.builder
+      ? this.builder.collidableSolids()
+      : this.layout.solids;
     const p = gameObject;
     for (let pass = 0; pass < 4; pass++) {
       const s = solids.find(
@@ -631,6 +815,7 @@ export class GameScene extends Phaser.Scene {
     const p = this.player;
     if (!p || !p.active) return;
     this.pushOutOfSolids(p, PLAYER.bodyRadius * 0.85);
+    this.constrainToTissue(p, PLAYER.bodyRadius * 0.85);
   }
 
   resolveEnemyEmbeddings() {
@@ -638,8 +823,59 @@ export class GameScene extends Phaser.Scene {
     // arcade's anti-teleport guard). Same deterministic rescue keeps them out.
     for (const e of this.enemies.getChildren()) {
       if (!e.active) continue;
-      this.pushOutOfSolids(e, (e.getData('radius') || 14) * 0.8);
+      const er = (e.getData('radius') || 14) * 0.8;
+      this.pushOutOfSolids(e, er);
+      this.constrainToTissue(e, er);
+      this.slideAlongTissue(e, er);
     }
+  }
+
+  /**
+   * Слайд вдоль плоти — лечит дрожание у стены. Классика жанра: ввод каждый
+   * кадр снова давит скоростью в стену, а коррекция отталкивает назад —
+   * получается осцилляция. Вместо этого проецируем шаг: целиком свободен —
+   * едем, иначе пробуем оси по отдельности (скольжение), иначе стоим.
+   * Проверка та же, что держит тело (полигон + наросты), так что проникно-
+   * вения нет и дёргать нечему. В тоннельном legacy — no-op.
+   */
+  slideAlongTissue(gameObject, bodyRadius) {
+    if (!this.portalMode || !gameObject || !gameObject.active || !gameObject.body) return;
+    const vx = gameObject.body.velocity.x;
+    const vy = gameObject.body.velocity.y;
+    if (vx === 0 && vy === 0) return;
+    const step = Math.min(Math.max(this.frameDt || 16, 1), 100) / 1000;
+    const walk = (x, y) => this.builder.isWalkable(x, y, bodyRadius);
+    const [nvx, nvy] = slideVelocity(walk, gameObject.x, gameObject.y, vx, vy, step, bodyRadius);
+    if (nvx !== vx || nvy !== vy) gameObject.setVelocity(nvx, nvy);
+  }
+
+  /**
+   * Полигон-контейнмент (портальный режим): удерживает тело внутри того же
+   * рисуемого контура пола, что видит игрок. Комнаты герметичны, так что
+   * это и есть «стена». `body.reset` заодно гасит скорость в стену.
+   * В тоннельном legacy — no-op, там держат прямоугольные тела.
+   */
+  constrainToTissue(gameObject, bodyRadius) {
+    if (!this.portalMode || !this.builder) return false;
+    const p = gameObject;
+    let room = this.worldApi.roomAt(p.x, p.y);
+    if (!room) {
+      // Вне всех rect (не должно случаться) — ближайшая по центру.
+      let best = null;
+      let bestD2 = Infinity;
+      for (const r of this.layout.rooms) {
+        const d2 = (r.cx - p.x) * (r.cx - p.x) + (r.cy - p.y) * (r.cy - p.y);
+        if (d2 < bestD2) { bestD2 = d2; best = r; }
+      }
+      room = best;
+    }
+    if (!room) return false;
+    const spot = this.builder.constrainToRoom(room, p.x, p.y, bodyRadius);
+    if (spot.x !== p.x || spot.y !== p.y) {
+      p.body.reset(spot.x, spot.y);
+      return true;
+    }
+    return false;
   }
 
   updateMovement() {
@@ -665,6 +901,15 @@ export class GameScene extends Phaser.Scene {
       const len = Math.hypot(dx, dy);
       dx /= len;
       dy /= len;
+    }
+    if (this.joyVec && (this.joyVec.x !== 0 || this.joyVec.y !== 0)) {
+      // Виртуальный стик складывается с клавиатурой, нормализация общая.
+      dx += this.joyVec.x;
+      dy += this.joyVec.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const cl = Math.min(len, 1);
+      dx = (dx / len) * cl;
+      dy = (dy / len) * cl;
     }
     // Arcade velocity is inherently FPS-independent (px/sec); walls resolve via collider.
     this.player.setVelocity(dx * this.heroStats().moveSpeed, dy * this.heroStats().moveSpeed);
@@ -703,6 +948,16 @@ export class GameScene extends Phaser.Scene {
     room.spawnedTotal = 0;
     room.markersPending = 0;
     this.refreshRoomPortals(room);
+    // Босс-зал: колония прячется, выходит босс крыла. Обычных спавнов нет.
+    if (room.type === 'boss') {
+      room.cleared = false;
+      room.queue = [];
+      this.spawnGrowths(room);
+      this.stashColony();
+      this.lockArena(room);
+      this.spawnBoss(room);
+      return;
+    }
     // Лавка: монстров нет, считается зачищенной сразу, товар — физические стенды.
     if (room.type === 'shop') {
       room.cleared = SHOP_CLEAR;
@@ -728,6 +983,12 @@ export class GameScene extends Phaser.Scene {
     // Level scaling: extra spawn markers on top of the base points.
     const extra = (this.run.level - 1) * ENEMY_LEVEL.extraSpawnsPerLevel;
     for (const p of this.sampleExtraSpawns(room, extra)) room.queue.push(p);
+    // Портальный режим: точки генератора прямоугольные — втягиваем каждую
+    // внутрь рисуемого полигона, чтобы телеграф не лежал на кайме стены.
+    if (this.portalMode) {
+      room.queue = room.queue.map((p) =>
+        this.worldApi.nearestWalkable(p.x, p.y, 16) || { x: room.cx, y: room.cy });
+    }
     this.tryQueue(room);
     ui.toast('Арена закрыта — зачисти комнату');
   }
@@ -879,9 +1140,9 @@ export class GameScene extends Phaser.Scene {
     return PORTAL.pairColors[linkIdx % PORTAL.pairColors.length];
   }
 
-  /** Заблокированы ли врата: незачищенная боевая комната не выпускает. */
+  /** Заблокированы ли врата: незачищенная боевая/босс комната не выпускает. */
   portalLocked(room) {
-    return !!room && room.type === 'combat' && !room.isStart &&
+    return !!room && (room.type === 'combat' || room.type === 'boss') && !room.isStart &&
       room.activated && !room.cleared;
   }
 
@@ -899,36 +1160,63 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** Один портал: зона-триггер + кольцо в цвете пары + мягкая пульсация. */
+  /** Один портал: венозная дыра — валик плоти снаружи, тёмный зев внутри. */
   spawnPortalView(p) {
     if (this.portalViews.has(p.id)) return;
     const color = this.portalPairColor(p.linkIdx);
+    const room = this.layout.rooms[p.roomId];
+    // Наружная сторона — от центра комнаты к вратам (там стена, туда валик).
+    let nx = 0, ny = 0;
+    if (room) {
+      const dx = p.x - room.cx;
+      const dy = p.y - room.cy;
+      const len = Math.hypot(dx, dy) || 1;
+      nx = dx / len;
+      ny = dy / len;
+    }
+    const ang = Math.atan2(ny, nx);
+    // Небольшая мясистая выпуклость снаружи (валик вокруг дыры, в цвет плоти).
+    const bulge = this.add.ellipse(
+      p.x + nx * 12, p.y + ny * 12, 92, 76, COLORS.flesh, 0.95
+    ).setDepth(2).setRotation(ang);
+    if (bulge.setStrokeStyle) bulge.setStrokeStyle(2, COLORS.wallInner, 0.6);
     const zone = this.portalGroup.create(p.x, p.y, TEX.portal);
-    if (!zone) return;
+    if (!zone) {
+      bulge.destroy();
+      return;
+    }
     zone.setDepth(4);
-    zone.setTint(color);
+    // Ткань НЕ красится в цвет пары — пара читается по тонкой жиле-кольцу.
+    if (zone.clearTint) zone.clearTint();
     zone.setData('portalId', p.id);
     zone.body.setCircle(PORTAL.radius, TEX_SIZE.portal / 2 - PORTAL.radius, TEX_SIZE.portal / 2 - PORTAL.radius);
     zone.body.updateFromGameObject();
+    // Тонкая жила в цвете пары — обе стороны одного линка одинаковые.
     const ring = this.add.circle(p.x, p.y, PORTAL.bodyRadius + 8)
-      .setStrokeStyle(3, color, 0.8).setDepth(3);
+      .setStrokeStyle(2.5, color, 0.65).setDepth(3);
+    // Сфинктер: закрытые врата затянуты плотью (видно только кольцо-блокаду).
+    const membrane = this.add.circle(p.x, p.y, 13, COLORS.fleshLight, 1).setDepth(5);
+    if (membrane.setStrokeStyle) membrane.setStrokeStyle(2, COLORS.wallEdge, 0.7);
+    membrane.setVisible(false);
     this.tweens.add({
-      targets: [zone, ring], scale: 1.08, duration: 800 + (p.id % 5) * 90,
+      targets: [zone, ring, membrane], scale: 1.07, duration: 800 + (p.id % 5) * 90,
       yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     });
-    const view = { zone, ring, data: p, locked: false, color };
+    const view = { zone, ring, bulge, membrane, data: p, locked: false, color };
     this.portalViews.set(p.id, view);
-    this.refreshPortalLock(view, this.layout.rooms[p.roomId]);
+    this.refreshPortalLock(view, room);
   }
 
-  /** Перекраска врат при блокировке/разблокировке комнаты. */
+  /** Сфинктер врат: закрытые затянуты плотью + красное кольцо, открытые — зев. */
   refreshPortalLock(view, room) {
     if (!view || !view.zone || !view.zone.active) return;
     const locked = this.portalLocked(room);
     view.locked = locked;
-    const tint = locked ? PORTAL.lockedColor : view.color;
-    view.zone.setTint(tint);
-    if (view.ring && view.ring.active) view.ring.setStrokeStyle(3, tint, locked ? 1 : 0.8);
+    if (view.membrane && view.membrane.active) view.membrane.setVisible(locked);
+    if (view.ring && view.ring.active) {
+      if (locked) view.ring.setStrokeStyle(3, PORTAL.lockedColor, 1);
+      else view.ring.setStrokeStyle(2.5, view.color, 0.65);
+    }
   }
 
   /** Обновить замки всех врат комнаты (вызывается при lock/unlock арены). */
@@ -1270,6 +1558,8 @@ export class GameScene extends Phaser.Scene {
         slots: ARTIFACT_SLOTS,
         used: this.run.activeArtifacts.length,
         plasma: this.run.plasma,
+        icon: this.texDataURL(TEX.relic),
+        activeIds: [...this.run.activeArtifacts],
         items: ARTIFACT_CATALOG.map((a) => ({
           id: a.id,
           name: a.name,
@@ -1379,7 +1669,7 @@ export class GameScene extends Phaser.Scene {
       this.spawnEnemyAt(p.x, p.y, room.id);
       this.checkRoomCleared(room);
     });
-    this.markers.push({ view, timer });
+    this.markers.push({ view, timer, roomId: room.id });
   }
 
   spawnEnemyAt(x, y, roomId) {
@@ -1405,6 +1695,315 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: e, scale: 1, duration: 180, ease: 'Back.easeOut' });
     const room = this.layout.rooms[roomId];
     if (room) room.spawnedTotal = (room.spawnedTotal || 0) + 1;
+  }
+
+  // ------------------------------------------------------------ boss fights
+
+  /** Колония прячется на время боя с боссом (данные целы, виды снесены). */
+  stashColony() {
+    this.stashedCells = this.run.cells.splice(0);
+    for (const cell of this.stashedCells) this.destroyAllyView(cell.id);
+    ui.setColonyCount(this.run.cells.length, this.run.maxCells);
+    this.refreshColonySide();
+  }
+
+  /** Колония возвращается после победы (добитые в бою клетки не воскресают). */
+  restoreColony() {
+    const back = this.stashedCells;
+    this.stashedCells = [];
+    for (const cell of back) {
+      if (!this.run.getCell(cell.id)) this.run.cells.push(cell);
+      cell.target = null;
+      cell.path = null;
+      this.spawnAllyView(cell);
+    }
+    ui.setColonyCount(this.run.cells.length, this.run.maxCells);
+    this.refreshColonySide();
+  }
+
+  /** Босс крыла в центре зала: гоняется и бьёт вближнюю как обычный враг. */
+  spawnBoss(room) {
+    const defIdx = (room.wing || 0) % BOSS.defs.length;
+    const def = BOSS.defs[defIdx];
+    const hp = Math.round(def.hp * (1 + BOSS.hpScalePerWing * (room.wing || 0)));
+    const spot = this.worldApi.nearestWalkable(room.cx, room.cy, def.radius) || { x: room.cx, y: room.cy };
+    const texKey = TEX[`boss-${defIdx}`] || TEX['enemy-c'];
+    const b = this.enemies.create(spot.x, spot.y, texKey);
+    if (!b) return;
+    b.setDepth(4);
+    b.setCollideWorldBounds(true);
+    b.setData('isBoss', true);
+    b.setData('bossIdx', defIdx);
+    b.setData('bossName', def.name);
+    b.setData('typeKey', 'boss');
+    b.setData('roomId', room.id);
+    b.setData('hp', hp);
+    b.setData('maxHp', hp);
+    b.setData('speed', def.speed);
+    b.setData('damage', def.damage);
+    b.setData('radius', def.radius);
+    b.setData('contactMs', def.contactCooldownMs);
+    b.setData('seed', Math.random() * Math.PI * 2);
+    const texSize = TEX_SIZE[`boss-${defIdx}`] || def.radius * 2;
+    const bodyR = def.radius * 0.8;
+    b.body.setCircle(bodyR, texSize / 2 - bodyR, texSize / 2 - bodyR);
+    b.setVelocity(0, 0);
+    const now = this.time.now;
+    b.setData('atk', def.attacks.map((a, i) => ({ nextAt: now + 2600 + i * 1600 })));
+    b.setData('tele', null);
+    b.setData('teleRing', null);
+    b.setData('spiral', null);
+    room.spawnedTotal = 1;
+    this.bossActive = room.id;
+    b.setScale(0.3);
+    this.tweens.add({ targets: b, scale: 1, duration: 350, ease: 'Back.easeOut' });
+    this.deathSparks.explode(20, spot.x, spot.y);
+    this.cameras.main.shake(180, 0.005);
+    ui.showBoss(def.name);
+    ui.setBossHp(hp, hp);
+    ui.toast(`БОСС: ${def.name} — паразиты прячутся, суператаки по кольцу!`);
+  }
+
+  /** Кулдауны и телеграфы суператак. Движение/ближний бой — общий updateEnemies. */
+  updateBosses(dt) {
+    if (this.isGameOver) return;
+    const now = this.time.now;
+    for (const b of this.enemies.getChildren()) {
+      if (!b.active || !b.getData('isBoss') || b.getData('dying')) continue;
+      const def = BOSS.defs[b.getData('bossIdx')];
+      if (!def) continue;
+      // Активная спираль: сеем снаряды, пока не вышло время.
+      const sp = b.getData('spiral');
+      if (sp) {
+        if (now < sp.until) {
+          sp.acc += dt;
+          while (sp.acc >= sp.tickMs) {
+            sp.acc -= sp.tickMs;
+            sp.ang += sp.step;
+            this.foeShot(b.x, b.y, sp.ang, sp.speed, sp.dmg);
+            this.foeShot(b.x, b.y, sp.ang + Math.PI, sp.speed, sp.dmg);
+          }
+        } else {
+          b.setData('spiral', null);
+        }
+      }
+      // Телеграф тикает — остальные атаки ждут своей очереди.
+      const tele = b.getData('tele');
+      if (tele) {
+        if (now >= tele.until) {
+          b.setData('tele', null);
+          this.destroyTeleRing(b);
+          this.fireBossAttack(b, def, tele.idx);
+        }
+        continue;
+      }
+      const states = b.getData('atk') || [];
+      for (let i = 0; i < states.length; i++) {
+        if (now >= states[i].nextAt) {
+          this.startBossTelegraph(b, def, i);
+          break;
+        }
+      }
+    }
+  }
+
+  /** Знак перед суперударом: пульсирующее кольцо + вспышка + название. */
+  startBossTelegraph(b, def, idx) {
+    const atk = def.attacks[idx];
+    if (!atk) return;
+    b.setData('tele', { idx, until: this.time.now + atk.telegraphMs });
+    const ring = this.add
+      .circle(b.x, b.y, def.radius + 16, COLORS.telegraph, 0.25)
+      .setDepth(2)
+      .setStrokeStyle(3, COLORS.telegraph, 0.95);
+    this.tweens.add({ targets: ring, scale: 1.35, duration: 320, yoyo: true, repeat: -1 });
+    b.setData('teleRing', ring);
+    setFillTint(b, 0xffffff);
+    ui.toast(`БОСС: ${atk.label}!`, 1600);
+  }
+
+  destroyTeleRing(b) {
+    const ring = b.getData('teleRing');
+    b.setData('teleRing', null);
+    if (ring && ring.active) {
+      this.tweens.killTweensOf(ring);
+      ring.destroy();
+    }
+    if (b.active) b.clearTint();
+  }
+
+  /** Выстрел состоялся: планируем следующий и исполняем паттерн. */
+  fireBossAttack(b, def, idx) {
+    if (!b.active || this.isGameOver) return;
+    const atk = def.attacks[idx];
+    if (!atk) return;
+    const states = b.getData('atk') || [];
+    if (states[idx]) states[idx].nextAt = this.time.now + atk.cooldownMs * (0.9 + Math.random() * 0.3);
+    const room = this.layout.rooms[b.getData('roomId')];
+    if (atk.kind === 'radial') {
+      const off = Math.random() * Math.PI * 2;
+      for (let r = 0; r < (atk.rings || 1); r++) {
+        this.time.delayedCall(r * (atk.ringDelayMs || 0), () => {
+          if (!b.active || this.isGameOver) return;
+          for (let i = 0; i < atk.count; i++) {
+            this.foeShot(b.x, b.y, off + (i / atk.count) * Math.PI * 2 + r * 0.3, atk.speed, atk.dmg);
+          }
+        });
+      }
+    } else if (atk.kind === 'aimed') {
+      const base = Math.atan2(this.player.y - b.y, this.player.x - b.x);
+      for (let i = 0; i < atk.count; i++) {
+        const t = atk.count === 1 ? 0 : (i / (atk.count - 1) - 0.5);
+        this.foeShot(b.x, b.y, base + t * (atk.spread || 0.4), atk.speed, atk.dmg);
+      }
+    } else if (atk.kind === 'spiral') {
+      b.setData('spiral', {
+        until: this.time.now + atk.durationMs, acc: 0,
+        ang: Math.random() * Math.PI * 2,
+        tickMs: atk.tickMs, step: atk.step, speed: atk.speed, dmg: atk.dmg
+      });
+    } else if (atk.kind === 'summon') {
+      if (!room || this.enemies.countActive(true) >= ENEMIES.maxAlive) return;
+      for (let i = 0; i < atk.count; i++) {
+        const a = (i / atk.count) * Math.PI * 2 + Math.random() * 0.5;
+        const spot = this.worldApi.nearestWalkable(
+          b.x + Math.cos(a) * 220, b.y + Math.sin(a) * 220, 16);
+        if (spot) this.spawnMarker(room, spot);
+      }
+    }
+    this.deathSparks.explode(6, b.x, b.y);
+  }
+
+  /** Вражеский снаряд с лимитом группы (старые гаснут, накопления нет). */
+  foeShot(x, y, angle, speed, dmg) {
+    if (this.foeShots.countActive(true) >= BOSS.foeCap) {
+      const oldest = this.foeShots.getFirstAlive();
+      if (oldest) oldest.destroy();
+    }
+    const s = this.foeShots.create(x, y, TEX.foe);
+    if (!s) return;
+    s.setDepth(5);
+    s.setData('age', 0);
+    s.setData('dmg', dmg);
+    s.body.setAllowGravity(false);
+    s.body.setCircle(BOSS.foeRadius, TEX_SIZE.foe / 2 - BOSS.foeRadius, TEX_SIZE.foe / 2 - BOSS.foeRadius);
+    s.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+  }
+
+  updateFoeShots(dt) {
+    const b = this.playBounds;
+    const margin = 60;
+    for (const s of this.foeShots.getChildren()) {
+      if (!s.active) continue;
+      s.setData('age', s.getData('age') + dt);
+      if (
+        s.getData('age') > BOSS.foeLifeMs ||
+        s.x < b.x - margin || s.y < b.y - margin ||
+        s.x > b.x + b.w + margin || s.y > b.y + b.h + margin
+      ) {
+        s.destroy();
+        continue;
+      }
+      if (this.portalMode && this.builder && !this.builder.isInsideAnyRoom(s.x, s.y, 2)) {
+        this.hitSparks.explode(2, s.x, s.y);
+        s.destroy();
+      }
+    }
+  }
+
+  onFoeShotWall(a, shot) {
+    // Пары прилетают перевёрнутыми (стена, снаряд) — ищем снаряд по текстуре.
+    const isFoe = (o) => !!o && !!o.active && !!o.texture && o.texture.key === TEX.foe;
+    const s = isFoe(a) ? a : isFoe(shot) ? shot : null;
+    if (!s || this.isGameOver) return;
+    this.hitSparks.explode(3, s.x, s.y);
+    s.destroy();
+  }
+
+  onFoeShotPlayer(player, shot) {
+    if (!shot || !shot.active || this.isGameOver) return;
+    const dmg = shot.getData('dmg') ?? 10;
+    const sx = shot.x, sy = shot.y;
+    shot.destroy();
+    this.applyHeroHit(dmg, sx, sy, null);
+  }
+
+  onFoeShotAlly(ally, shot) {
+    if (!shot || !shot.active || !ally || !ally.active || this.isGameOver) return;
+    const cell = this.run.getCell(ally.getData('cellId'));
+    const dmg = shot.getData('dmg') ?? 10;
+    shot.destroy();
+    if (cell) this.damageCell(cell, dmg);
+  }
+
+  /**
+   * Смертельный удар: босс входит в агонию (не бьёт, не колдует, урон не
+   * принимает), а награда выдаётся только после анимации — в finishBossKill.
+   */
+  killBoss(boss) {
+    if (!boss.active || boss.getData('dying')) return;
+    boss.setData('dying', true);
+    boss.setVelocity(0, 0);
+    boss.setData('spiral', null);
+    this.destroyTeleRing(boss);
+    this.cameras.main.shake(150, 0.004);
+    // Вспышки + разрывы по телу: агония читается издалека.
+    const flashes = Math.max(3, Math.floor(BOSS.deathAnimMs / 130));
+    for (let i = 0; i < flashes; i++) {
+      this.time.delayedCall(i * 130, () => {
+        if (!boss.active) return;
+        setFillTint(boss, i % 2 ? 0xff4d5e : 0xffffff);
+        this.deathSparks.explode(5,
+          boss.x + (Math.random() - 0.5) * 70, boss.y + (Math.random() - 0.5) * 70);
+      });
+    }
+    this.tweens.add({ targets: boss, scale: 1.3, duration: BOSS.deathAnimMs, ease: 'Sine.easeIn' });
+    const roomId = boss.getData('roomId');
+    const name = boss.getData('bossName') || 'Босс';
+    ui.toast(`Босс «${name}» издыхает…`);
+    this.time.delayedCall(BOSS.deathAnimMs, () => this.finishBossKill(boss, roomId, name));
+  }
+
+  /** Финал агонии: взрыв, щедрая награда, колония возвращается, зал зачищается. */
+  finishBossKill(boss, roomId, name) {
+    if (!boss.active) return;
+    const x = boss.x, y = boss.y;
+    const room = typeof roomId === 'number' ? this.layout.rooms[roomId] : null;
+    this.deathSparks.explode(40, x, y);
+    this.hitSparks.explode(16, x, y);
+    this.cameras.main.shake(220, 0.006);
+    boss.destroy();
+    this.bossActive = null;
+    ui.hideBoss();
+    this.kills += 1;
+    this.run.addPlasma(BOSS.rewardPlasma);
+    // Не даём отложенным телеграфам призыва доставить свиту после победы.
+    if (room) this.cancelRoomMarkers(room);
+    // Свита дохнет вместе с хозяином (обычные награды за каждую).
+    for (const e of [...this.enemies.getChildren()]) {
+      if (e.active && !e.getData('isBoss') && e.getData('roomId') === roomId) this.killEnemy(e);
+    }
+    this.restoreColony();
+    this.pendingLevels += BOSS.rewardLevels;
+    this.pushHud();
+    if (room) this.checkRoomCleared(room);
+    ui.toast(`Босс «${name}» повержен! +${BOSS.rewardLevels} уровня · +${BOSS.rewardPlasma} плазмы`);
+    if (!this.isGameOver) this.openDraft();
+  }
+
+  /** Снять отложенные телеграфные метки комнаты (победа/перезапуск боя). */
+  cancelRoomMarkers(room) {
+    if (!room) return;
+    let cut = 0;
+    for (const m of this.markers) {
+      if (m.roomId !== room.id) continue;
+      this.tweens.killTweensOf(m.view);
+      if (m.timer) m.timer.remove(false);
+      if (m.view && m.view.active) m.view.destroy();
+      cut += 1;
+    }
+    this.markers = this.markers.filter((m) => m.roomId !== room.id);
+    room.markersPending = Math.max(0, (room.markersPending || 0) - cut);
   }
 
   checkRoomCleared(room) {
@@ -1437,22 +2036,36 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
-  /** Nearest dead-end (leaf) room to the player; lowest degree breaks ties. */
+  /**
+   * Точка роста следующего чанка: пройденный босс-зал самого свежего крыла.
+   * Зачистил босса — ткань растёт дальше из его зала. Фолбэк (босса нет):
+   * ближайший тупик, как раньше.
+   */
   pickGateway() {
-    const deg = roomDegrees(this.layout);
-    let best = null;
-    let bestScore = null;
+    let bossGate = null;
     for (const r of this.layout.rooms) {
-      const d = deg.get(r.id) ?? 99;
-      const dist = Math.hypot(r.cx - this.player.x, r.cy - this.player.y);
-      // Leaves first (degree 1), then nearest — score sorts degree, then dist.
-      const score = d * 1e9 + dist;
-      if (bestScore === null || score < bestScore) {
-        bestScore = score;
-        best = r;
-      }
+      if (!r.isBoss || !r.cleared) continue;
+      if (!bossGate || (r.wing || 0) > (bossGate.wing || 0)) bossGate = r;
     }
-    return best;
+    if (bossGate) return bossGate;
+    const deg = roomDegrees(this.layout);
+    const cands = this.layout.rooms.filter((r) => !r.isBoss);
+    for (const pool of [cands.length ? cands : this.layout.rooms]) {
+      let best = null;
+      let bestScore = null;
+      for (const r of pool) {
+        const d = deg.get(r.id) ?? 99;
+        const dist = Math.hypot(r.cx - this.player.x, r.cy - this.player.y);
+        // Leaves first (degree 1), then nearest — score sorts degree, then dist.
+        const score = d * 1e9 + dist;
+        if (bestScore === null || score < bestScore) {
+          bestScore = score;
+          best = r;
+        }
+      }
+      if (best) return best;
+    }
+    return null;
   }
 
   checkExpansion(dt) {
@@ -1470,7 +2083,19 @@ export class GameScene extends Phaser.Scene {
     if (!gateway) return;
     const wingIndex = this.wingCount + 1;
     const t0 = performance.now();
-    const res = generateWing(this.seed, wingIndex, this.layout, gateway.id);
+    // Крыло в тех же размерах, что база (иначе комнаты выходят мелкими),
+    // и сопоставимого размера (иначе 15 больших залов не влезают в поле).
+    const res = generateWing(this.seed, wingIndex, this.layout, gateway.id, {
+      roomMin: DUNGEON.roomMin,
+      roomMax: DUNGEON.roomMax,
+      startRoomMin: DUNGEON.startRoomMin,
+      tunnelWidth: DUNGEON.tunnelWidth,
+      wall: DUNGEON.wall,
+      spawnAreaPer: DUNGEON.spawnAreaPer,
+      spawnMin: DUNGEON.spawnMin,
+      spawnMax: DUNGEON.spawnMax,
+      wingRooms: DUNGEON.roomCountMax,
+    });
     if (!res) {
       // No free space found from here — try again later (player may move on).
       this.expandRetryAt = this.time.now + 15000;
@@ -1501,7 +2126,7 @@ export class GameScene extends Phaser.Scene {
       `[viscera] wing ${wingIndex}: +${res.roomIds.length} rooms via dead-end ${gateway.id} ` +
       `in ${(performance.now() - t0).toFixed(0)}ms (total ${this.layout.rooms.length})`
     );
-    ui.toast(`New tissue grown — ${res.roomIds.length} chambers (wing ${wingIndex})`);
+    ui.toast(`Выросла новая ткань — ${res.roomIds.length} камер (крыло ${wingIndex})`);
     this.pushHud();
   }
 
@@ -1527,7 +2152,7 @@ export class GameScene extends Phaser.Scene {
     const px = this.player.x;
     const py = this.player.y;
     for (const e of this.enemies.getChildren()) {
-      if (!e.active) continue;
+      if (!e.active || e.getData('dying')) continue;
       const dx = e.x - px;
       const dy = e.y - py;
       const d2 = dx * dx + dy * dy;
@@ -1683,6 +2308,7 @@ export class GameScene extends Phaser.Scene {
     if (!cell) return;
     this.spawnAllyView(cell);
     ui.setColonyCount(this.run.cells.length, this.run.maxCells);
+    this.refreshColonySide();
     ui.toast(`Клетка «${ALLY_TYPES[type].name}» вылупилась из нароста!`);
     this.pushHud();
   }
@@ -1780,6 +2406,7 @@ export class GameScene extends Phaser.Scene {
     }
     for (const e of this.enemies.getChildren()) {
       if (!e.active) continue;
+      if (e.getData('dying')) { e.setVelocity(0, 0); continue; } // агония: лежит
       const tgt = this.resolveFoeTarget(e) || this.nearestFoe(e.x, e.y);
       if (!tgt) {
         e.setVelocity(0, 0);
@@ -1798,7 +2425,8 @@ export class GameScene extends Phaser.Scene {
       } else {
         e.setVelocity(0, 0);
         const cd = (e.getData('atkCd') || 0) + dt;
-        if (cd >= ENEMIES.attackCooldownMs) {
+        // Босс бьёт вближнюю по своему кулдауну из конфига.
+        if (cd >= (e.getData('contactMs') || ENEMIES.attackCooldownMs)) {
           e.setData('atkCd', 0);
           this.enemyStrike(e, tgt);
         } else {
@@ -1910,6 +2538,12 @@ export class GameScene extends Phaser.Scene {
         bullet.x > b.x + b.w + margin || bullet.y > b.y + b.h + margin
       ) {
         bullet.destroy(); // bounded by pool cap + lifespan; never accumulates
+        continue;
+      }
+      // Портальный режим: стен-тел нет — снаряд гаснет, выйдя из плоти.
+      if (this.portalMode && this.builder && !this.builder.isInsideAnyRoom(bullet.x, bullet.y, 2)) {
+        this.hitSparks.explode(3, bullet.x, bullet.y);
+        bullet.destroy();
       }
     }
   }
@@ -2073,14 +2707,14 @@ export class GameScene extends Phaser.Scene {
 
   mutationTargetOptions(key) {
     const opts = [
-      { id: 'hero', label: 'Hero (you)', sub: `mutation Lv ${this.run.mutationLevel('hero', key)}` }
+      { id: 'hero', label: 'Герой (ты)', sub: `мутация ур. ${this.run.mutationLevel('hero', key)}` }
     ];
     for (const cell of this.run.cells) {
       const t = ALLY_TYPES[cell.type];
       opts.push({
         id: `cell:${cell.id}`,
-        label: `${t.name} #${cell.id}${cell.merge > 1 ? ` · merge ${cell.merge}` : ''}`,
-        sub: `mutation Lv ${this.run.mutationLevel('cell', key, cell.id)} · HP ${Math.ceil(cell.hp)}`
+        label: `${t.name} #${cell.id}${cell.merge > 1 ? ` · слияние ${cell.merge}` : ''}`,
+        sub: `мутация ур. ${this.run.mutationLevel('cell', key, cell.id)} · ЗДР ${Math.ceil(cell.hp)}`
       });
     }
     return opts;
@@ -2103,6 +2737,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.dirtyHero();
     this.pendingLevels -= 1;
+    this.refreshColonySide();
     this.pushHud();
     if (this.pendingLevels > 0 && !this.isGameOver) {
       // Chain: next level's draft while staying paused.
@@ -2147,8 +2782,34 @@ export class GameScene extends Phaser.Scene {
       run: this.run,
       hero: this.heroStats(),
       heroHp: this.hp,
-      cells: this.run.cells.map((c) => ({ cell: c, stats: this.run.computeCell(c) }))
+      cells: this.run.cells.map((c) => ({
+        cell: c,
+        stats: this.run.computeCell(c),
+        img: this.texDataURL(allyTexKey(c.type, c.merge))
+      }))
     };
+  }
+
+  /** Сайд-панель активных клеток: герой + колония, картинки и мутации. */
+  refreshColonySide() {
+    ui.renderColonySide(
+      {
+        hero: { level: this.run.level, xp: this.run.xp, req: this.run.requiredXp(), hp: this.hp, maxHp: this.heroStats().maxHealth },
+        stashed: this.stashedCells.length,
+        cells: this.run.cells.map((c) => {
+          const st = this.run.computeCell(c);
+          return {
+            id: c.id, type: c.type, merge: c.merge,
+            name: `${(ALLY_TYPES[c.type] || {}).name || c.type} #${c.id}`,
+            img: this.texDataURL(allyTexKey(c.type, c.merge)),
+            hp: Math.max(0, Math.ceil(c.hp == null ? st.maxHealth : c.hp)),
+            maxHp: st.maxHealth, attack: st.attack,
+            muts: Object.entries(c.mutations).map(([k, v]) => ({ name: (MUTATIONS[k] || {}).name || k, v }))
+          };
+        })
+      },
+      () => { if (!this.modalOpen && !this.isGameOver) this.openColony(); }
+    );
   }
 
   doMerge(aId, bId) {
@@ -2159,6 +2820,7 @@ export class GameScene extends Phaser.Scene {
     this.dirtyHero();
     ui.setColonyCount(this.run.cells.length, this.run.maxCells);
     this.renderColony();
+    this.refreshColonySide();
     this.pushHud();
     return true;
   }
@@ -2186,8 +2848,10 @@ export class GameScene extends Phaser.Scene {
   /** Shared enemy-damage path (bullets + ally melee): flash, sparks, death. */
   damageEnemy(enemy, dmg) {
     if (!enemy.active || this.isGameOver) return;
+    if (enemy.getData('dying')) return; // агония босса: урон уже не принимает
     const hp = enemy.getData('hp') - dmg;
     enemy.setData('hp', hp);
+    if (enemy.getData('isBoss')) ui.setBossHp(Math.max(0, hp), enemy.getData('maxHp') || hp);
     this.hitSparks.explode(5, enemy.x, enemy.y);
     if (hp <= 0) {
       this.killEnemy(enemy);
@@ -2237,7 +2901,7 @@ export class GameScene extends Phaser.Scene {
   // ------------------------------------------------------- friendly cells
 
   spawnAllyView(cell) {
-    const key = `cell-${cell.type}`;
+    const key = allyTexKey(cell.type, cell.merge);
     const size = TEX_SIZE[key] || 28;
     const a = Math.random() * Math.PI * 2;
     const spot =
@@ -2281,7 +2945,9 @@ export class GameScene extends Phaser.Scene {
     if (!v) return;
     v.badge.setText(MERGE_BADGE[Math.min(cell.merge, MERGE_BADGE.length) - 1] || 'I');
     v.badge.setVisible(cell.merge > 1);
+    v.sprite.setTexture(allyTexKey(cell.type, cell.merge)); // вид растёт с уровнем
     v.sprite.setScale(1 + 0.12 * (cell.merge - 1));
+    this.refreshColonySide();
   }
 
   damageCell(cell, dmg) {
@@ -2307,6 +2973,7 @@ export class GameScene extends Phaser.Scene {
     this.run.removeCell(cell.id); // frees one colony slot
     ui.setColonyCount(this.run.cells.length, this.run.maxCells);
     if (panels.isColonyOpen()) this.renderColony();
+    this.refreshColonySide();
   }
 
   /** Nearest live enemy within aggro, or null. */
@@ -2332,6 +2999,7 @@ export class GameScene extends Phaser.Scene {
       if (!v || !v.sprite.active) continue;
       const st = this.run.computeCell(cell);
       const sp = v.sprite;
+      cell.resting = false; // намеренная остановка — только в ветках ниже
       // Sticky target: keep until dead or far away, then nearest in aggro.
       let tgt = cell.target && cell.target.active ? cell.target : null;
       if (tgt && Math.hypot(tgt.x - sp.x, tgt.y - sp.y) > ALLIES.dropAggroRadius) tgt = null;
@@ -2357,6 +3025,7 @@ export class GameScene extends Phaser.Scene {
           }
         } else {
           sp.setVelocity(0, 0);
+          cell.resting = true;
           cell.cd += dt;
           if (cell.cd >= st.intervalMs) {
             cell.cd = 0;
@@ -2366,23 +3035,33 @@ export class GameScene extends Phaser.Scene {
       } else {
         // No foes: route back to the hero's orbit so the colony stays together
         // (paths lead through doors/tunnels instead of pushing into walls).
+        // Якорь орбиты — всегда проходимая точка: сырой слот может лежать
+        // внутри нароста/стенда, и тогда клетка вечно давила бы в стену.
         const ang = cell.id * 2.4;
-        const ax = this.player.x + Math.cos(ang) * 95;
-        const ay = this.player.y + Math.sin(ang) * 95;
-        const dx = ax - sp.x;
-        const dy = ay - sp.y;
+        let orb = cell.orbit;
+        if (!orb || Math.hypot(this.player.x - orb.hx, this.player.y - orb.hy) > 50) {
+          const rawX = this.player.x + Math.cos(ang) * 95;
+          const rawY = this.player.y + Math.sin(ang) * 95;
+          const spot = this.worldApi.nearestWalkable(rawX, rawY, st.bodyR) ||
+            { x: this.player.x, y: this.player.y };
+          orb = cell.orbit = { x: spot.x, y: spot.y, hx: this.player.x, hy: this.player.y };
+          if (cell.path) { cell.path.pts = null; cell.path.cd = 0; }
+        }
+        const dx = orb.x - sp.x;
+        const dy = orb.y - sp.y;
         const d = Math.hypot(dx, dy);
         if (!cell.path) cell.path = { pts: null, i: 0, gx: 0, gy: 0, age: 99, cd: 0 };
         const h = cell.path;
         if (d < 30) {
           sp.setVelocity(0, 0);
+          cell.resting = true;
           h.pts = null;
           h.cd = 0.4;
         } else {
           h.age += dt;
           if (h.cd > 0) h.cd -= dt;
-          if (this.pathNeedsRepath(h, ax, ay, 800) && h.cd <= 0) {
-            this.repath(h, sp.x, sp.y, ax, ay);
+          if (this.pathNeedsRepath(h, orb.x, orb.y, 800) && h.cd <= 0) {
+            this.repath(h, sp.x, sp.y, orb.x, orb.y);
           }
           if (!this.followPath(sp, h, st.moveSpeed)) {
             const s = d > ALLIES.leashRadius ? 1 : 0.5;
@@ -2391,7 +3070,58 @@ export class GameScene extends Phaser.Scene {
         }
       }
       this.pushOutOfSolids(sp, st.bodyR * 0.8);
+      this.constrainToTissue(sp, st.bodyR * 0.8);
+      this.slideAlongTissue(sp, st.bodyR * 0.8);
+      this.trackAllyStuck(cell, sp, dt);
     }
+  }
+
+  /**
+   * Детектор застревания: клетка не отдыхает (есть цель/орбита), но почти не
+   * смещается ~1.2с — значит, её зажало (толкотня колонии, узость, угол).
+   * Спасаем переносом в свободную точку у героя и сбросом пути.
+   */
+  trackAllyStuck(cell, sp, dt) {
+    if (!cell.stuck) cell.stuck = { x: sp.x, y: sp.y, acc: 0, bad: 0 };
+    const mark = cell.stuck;
+    if (cell.resting) {
+      mark.acc = 0;
+      mark.bad = 0;
+      mark.x = sp.x;
+      mark.y = sp.y;
+      return;
+    }
+    mark.acc += dt;
+    if (mark.acc < 600) return;
+    mark.acc = 0;
+    if (Math.hypot(sp.x - mark.x, sp.y - mark.y) < 12) {
+      mark.bad += 1;
+    } else {
+      mark.bad = 0;
+    }
+    mark.x = sp.x;
+    mark.y = sp.y;
+    if (mark.bad >= 2) {
+      mark.bad = 0;
+      this.rescueAlly(cell, sp);
+    }
+  }
+
+  /** Вытащить застрявшую клетку: свободное место у героя + новый план пути. */
+  rescueAlly(cell, sp) {
+    const st = this.run.computeCell(cell);
+    let spot = null;
+    for (let i = 0; i < 6 && !spot; i++) {
+      const a = Math.random() * Math.PI * 2;
+      spot = this.worldApi.nearestWalkable(
+        this.player.x + Math.cos(a) * (80 + i * 15),
+        this.player.y + Math.sin(a) * (80 + i * 15), st.bodyR);
+    }
+    if (!spot) return;
+    sp.body.reset(spot.x, spot.y);
+    sp.setVelocity(0, 0);
+    cell.path = null;
+    cell.orbit = null;
   }
 
   updateAllyViews() {
@@ -2411,6 +3141,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   killEnemy(enemy) {
+    // Босс умирает по-своему: награда, свита, колония, зачистка зала.
+    if (enemy.getData && enemy.getData('isBoss')) {
+      this.killBoss(enemy);
+      return;
+    }
     // Capture everything before destroy(): post-destroy reads are unreliable.
     const x = enemy.x;
     const y = enemy.y;
@@ -2439,6 +3174,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isGameOver) return;
     this.isGameOver = true;
     this.hp = 0;
+    ui.hideBoss();
     panels.hideAll();
     this.modalOpen = false;
     this.pendingLevels = 0;

@@ -20,6 +20,9 @@ export class UI {
     this.colonyBtn = document.getElementById('colony-btn');
     this.artifactsBtn = document.getElementById('artifacts-btn');
     this.toastEl = document.getElementById('toast');
+    this.bossBar = document.getElementById('boss-bar');
+    this.bossName = document.getElementById('boss-name');
+    this.bossFill = document.getElementById('boss-fill');
     this._toastTimer = null;
     this.gameoverEl = document.getElementById('gameover');
     this.finalKillsEl = document.getElementById('final-kills');
@@ -69,6 +72,7 @@ export class UI {
 
   reset() {
     this.hideGameOver();
+    this.hideBoss();
     this.update(100, 100, 0, 0, 0);
     this.setLevel(1, 0, 6);
     this.setColonyCount(0, 5);
@@ -76,7 +80,7 @@ export class UI {
   }
 
   setSeed(seed) {
-    if (this.seedText) this.seedText.textContent = `seed ${seed}`;
+    if (this.seedText) this.seedText.textContent = `сид ${seed}`;
   }
 
   update(hp, maxHp, kills, motes = 0, plasma = 0) {
@@ -98,11 +102,80 @@ export class UI {
   }
 
   setColonyCount(n, max) {
-    if (this.colonyBtn) this.colonyBtn.textContent = `Colony (${n}/${max})`;
+    if (this.colonyBtn) this.colonyBtn.textContent = `Колония (${n}/${max})`;
   }
 
   setArtifacts(n, max) {
-    if (this.artifactsBtn) this.artifactsBtn.textContent = `Artifacts (${n}/${max})`;
+    if (this.artifactsBtn) this.artifactsBtn.textContent = `Артефакты (${n}/${max})`;
+  }
+
+  /**
+   * Сайд-панель колонии (всегда на виду): герой + активные клетки
+   * с картинками, уровнями слияния, HP и мутациями. Клик — открыть колонию.
+   */
+  renderColonySide(view, onOpen) {
+    const box = document.getElementById('colony-side');
+    if (!box) return;
+    box.classList.remove('hidden');
+    box.replaceChildren();
+    const mk = (tag, cls, text) => {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text !== undefined) n.textContent = text;
+      return n;
+    };
+    const hero = mk('div', 'side-hero');
+    hero.appendChild(mk('span', 'side-hero-name', `Герой · ур. ${view.hero.level}`));
+    hero.appendChild(mk('span', 'side-hero-xp', `опыт ${view.hero.xp}/${view.hero.req}`));
+    box.appendChild(hero);
+    if (view.stashed > 0) {
+      box.appendChild(mk('div', 'side-note', `Колония прячется (${view.stashed}) — идёт бой с боссом`));
+    }
+    if (!view.cells.length && !view.stashed) {
+      box.appendChild(mk('div', 'side-note', 'Колония пуста — клетки дают уровни'));
+    }
+    for (const c of view.cells) {
+      const row = mk('button', 'side-cell');
+      row.type = 'button';
+      if (c.img) {
+        const im = document.createElement('img');
+        im.className = 'side-cell-img';
+        im.src = c.img;
+        im.alt = '';
+        row.appendChild(im);
+      }
+      const info = mk('div', 'side-cell-info');
+      info.appendChild(mk('div', 'side-cell-name', `${c.name || ('#' + c.id)}${c.merge > 1 ? ` · слияние ${c.merge}` : ''}`));
+      const bar = mk('div', 'side-hp-track');
+      const fill = mk('div', 'side-hp-fill');
+      fill.style.width = `${Math.round((100 * c.hp) / Math.max(1, c.maxHp))}%`;
+      bar.appendChild(fill);
+      info.appendChild(bar);
+      info.appendChild(mk('div', 'side-cell-sub', `ЗДР ${c.hp}/${c.maxHp} · АТК ${c.attack}`));
+      info.appendChild(mk('div', 'side-cell-sub dim',
+        c.muts.length ? c.muts.map((m) => `${m.name} ${m.v}`).join(' · ') : 'без мутаций'));
+      row.appendChild(info);
+      row.addEventListener('click', onOpen);
+      box.appendChild(row);
+    }
+    this._colonySideOpen = onOpen;
+  }
+
+  /** Полоска босса сверху экрана: показать, обновить, спрятать. */
+  showBoss(name) {
+    if (this.bossName) this.bossName.textContent = String(name).toUpperCase();
+    if (this.bossFill) this.bossFill.style.width = '100%';
+    if (this.bossBar) this.bossBar.classList.remove('hidden');
+  }
+
+  setBossHp(hp, maxHp) {
+    if (!this.bossFill) return;
+    const pct = Math.max(0, Math.min(1, hp / Math.max(1, maxHp)));
+    this.bossFill.style.width = `${Math.round(pct * 100)}%`;
+  }
+
+  hideBoss() {
+    if (this.bossBar) this.bossBar.classList.add('hidden');
   }
 
   /** Brief bottom-center notice (expansion grown, etc.). Fire-and-forget. */

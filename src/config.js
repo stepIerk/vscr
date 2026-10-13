@@ -13,6 +13,15 @@ export const COLORS = {
   floorRim: 0x4a1d26, // faint inner floor edge
   wall: 0x120709, // dense dark tissue wall (rooms, tunnels, blocks alike)
   wallEdge: 0x8a2f3d, // crisp crimson wall outline
+  // Органические слои стен (портальный режим): масса → плоть → кайма.
+  wallMid: 0x2b1116, // средняя плоть стены (полоса вокруг пола)
+  wallInner: 0x4a1d26, // внутренняя кайма вдоль проходимого пола
+  wallHighlight: 0x8a3a4a, // светлые доли/выпуклости ткани
+  wallCrevice: 0x0d0406, // тёмные впадины между долями
+  flesh: 0x3a151c, // мясистая выпуклость (наружный валик портала)
+  fleshLight: 0x5a2530, // светлая плоть (блики, мембрана)
+  hole: 0x140809, // тёмная глубина венозной дыры
+  holeDeep: 0x050203, // почти чёрное дно портала
   vein: 0x6e2430, // muted raspberry veins / decor
   mottle: 0x170a0d, // darker floor mottling
   telegraph: 0xff2d40, // enemy spawn warning — clearly visible red
@@ -33,10 +42,10 @@ export const COLORS = {
 /** Dungeon generation parameters (game coords, not screen pixels). */
 export const DUNGEON = {
   // Сколько комнат генерируется на карте (минимум/максимум).
-  roomCountMin: 12,
-  roomCountMax: 18,
+  roomCountMin: 3,
+  roomCountMax: 5,
   // Размеры комнат в игровых координатах (не зависят от разрешения экрана).
-  roomMin: 760,
+  roomMin: 1000,
   roomMax: 1500,
   // Минимальная сторона стартовой (безопасной) комнаты.
   startRoomMin: 700,
@@ -109,9 +118,12 @@ export const ARENA = {
 
 /**
  * Врата-порталы соединяют комнаты напрямую вместо тоннелей.
+ * По лору это венозные дыры в плоти: тёмный зев с мясистым валиком
+ * снаружи, в цветах окружающих внутренностей. Стоят возле края комнаты,
+ * со стороны соседней комнаты (луч на её центр → стена → отступ внутрь).
  * - Каждый линк графа даёт ровно пару врат (туда-обратно),
- *   обе стороны одного линка красятся в один цвет.
- * - Врата в незачищенной боевой комнате заблокированы (сбежать нельзя).
+ *   обе стороны одного линка помечены одной тонкой жилой-кольцом.
+ * - Врата в незачищенной боевой комнате затянуты сфинктером (не выпускают).
  */
 export const PORTAL = {
   radius: 34, // радиус зоны срабатывания телепорта
@@ -129,6 +141,48 @@ export const PORTAL = {
 export const RESOURCE = {
   pickupRadius: 34,
   cap: 200 // oldest motes are recycled past this (no accumulation)
+};
+
+/* ------------------------------------------------- боссы в конце крыльев */
+
+/**
+ * Босс-комната appended в конец каждого крыла (базовый layout — крыло 0,
+ * дальше generateWing): больше обычных комнат, без препятствий и обычных
+ * спавнов. Бой: колония прячется, босс гоняется и бьёт вближнюю как обычный
+ * враг + раз в cooldown устраивает bullet-hell суператаку с телеграфом.
+ * Награда: +rewardLevels уровней (драфты) + плазма.
+ */
+export const BOSS = {
+  roomMin: 1300, // сторона босс-комнаты (больше обычных roomMax)
+  roomMax: 1700,
+  rewardLevels: 2, // +N уровней (выборов карт) за победу
+  rewardPlasma: 15, // плазмы сверху
+  deathAnimMs: 1400, // агония босса: вспышки и разрывы до выдачи награды
+  hpScalePerWing: 0.25, // +25% HP за каждое следующее крыло
+  foeCap: 120, // лимит вражеских снарядов (старые гаснут)
+  foeLifeMs: 4000, // время жизни вражеского снаряда
+  foeRadius: 7, // радиус тела снаряда
+  /** Ростер: крыло N берёт defs[N % len]. У каждого свои атаки/статы. */
+  defs: [
+    {
+      key: 'maw', name: 'Утроба', tint: 0xc44dff,
+      hp: 70, speed: 85, damage: 16, radius: 32, contactCooldownMs: 1100,
+      attacks: [
+        { kind: 'radial', label: 'Кольцевой залп', cooldownMs: 9000, telegraphMs: 1200, count: 14, rings: 2, ringDelayMs: 280, speed: 170, dmg: 12 },
+        { kind: 'aimed', label: 'Прицельный веер', cooldownMs: 6000, telegraphMs: 800, count: 5, spread: 0.45, speed: 330, dmg: 14 },
+        { kind: 'summon', label: 'Призыв стаи', cooldownMs: 15000, telegraphMs: 1000, count: 3 },
+      ]
+    },
+    {
+      key: 'choir', name: 'Хор', tint: 0x4dd2ff,
+      hp: 110, speed: 62, damage: 20, radius: 38, contactCooldownMs: 1300,
+      attacks: [
+        { kind: 'spiral', label: 'Спираль', cooldownMs: 12000, telegraphMs: 1200, durationMs: 5000, tickMs: 130, step: 0.42, speed: 150, dmg: 10 },
+        { kind: 'radial', label: 'Кольцевой залп', cooldownMs: 8000, telegraphMs: 1000, count: 20, rings: 1, ringDelayMs: 0, speed: 200, dmg: 12 },
+        { kind: 'summon', label: 'Призыв стаи', cooldownMs: 16000, telegraphMs: 1000, count: 4 },
+      ]
+    },
+  ]
 };
 
 /* ------------------------------------------------- вторая валюта: плазма */
@@ -260,6 +314,11 @@ export const GAME_VIEW = {
   zoom: 1
 };
 
+/** Мобильное управление: тихий стик + сдвиг фокуса камеры от него. */
+export const TOUCH = {
+  followOffsetY: 90, // фокус ниже героя: герой выше центра, бой не под стиком
+};
+
 /* ------------------------------------------------ progression (stage 1) */
 
 /** XP curve: biomass to go from level L to L+1. */
@@ -291,20 +350,20 @@ export const ALLIES = {
  */
 export const ALLY_TYPES = {
   hunter: {
-    name: 'Hunter',
-    role: 'Pursues the nearest enemy and strikes it down.',
+    name: 'Охотник',
+    role: 'Преследует ближайшего врага и добивает его.',
     attack: 5, attackIntervalMs: 850, moveSpeed: 245, maxHealth: 54,
     range: 80, bodyR: 11, tint: 0x46d8ff
   },
   defender: {
-    name: 'Defender',
-    role: 'Durable close-range fighter that holds enemies off you.',
+    name: 'Защитник',
+    role: 'Живучий боец ближнего боя, держит врагов вдали от тебя.',
     attack: 1, attackIntervalMs: 1400, moveSpeed: 175, maxHealth: 85,
     range: 70, bodyR: 14, tint: 0x3ddc84
   },
   parasite: {
-    name: 'Parasite',
-    role: 'Fragile but relentless: very frequent weak bites.',
+    name: 'Паразит',
+    role: 'Хрупкий, но неумолимый: очень частые слабые укусы.',
     attack: 3, attackIntervalMs: 300, moveSpeed: 215, maxHealth: 42,
     range: 70, bodyR: 9, tint: 0xb8f53d
   }
@@ -313,28 +372,28 @@ export const ALLY_TYPES = {
 /** Mutations apply to hero and/or one cell; re-pick raises the level. */
 export const MUTATIONS = {
   metabolism: {
-    name: 'Accelerated metabolism', targets: ['hero', 'cell'], maxLevel: 5,
-    desc: '+25% attack speed per level', speedBonus: 0.25
+    name: 'Ускоренный метаболизм', targets: ['hero', 'cell'], maxLevel: 5,
+    desc: '+25% к скорости атаки за уровень', speedBonus: 0.25
   },
   membrane: {
-    name: 'Reinforced membrane', targets: ['hero', 'cell'], maxLevel: 5,
-    desc: '+25 max health per level', healthBonus: 25
+    name: 'Укреплённая мембрана', targets: ['hero', 'cell'], maxLevel: 5,
+    desc: '+25 к макс. здоровью за уровень', healthBonus: 25
   },
   acid: {
-    name: 'Acid secretions', targets: ['hero', 'cell'], maxLevel: 5,
-    desc: '+0.5 attack damage per level', damageBonus: 0.5
+    name: 'Кислотные железы', targets: ['hero', 'cell'], maxLevel: 5,
+    desc: '+0.5 к урону за уровень', damageBonus: 0.5
   }
 };
 
 /** Passive upgrades: hero-only or all-cells, leveled by re-picks. */
 export const UPGRADES = {
-  pulse: { name: 'Amplified pulse', target: 'hero', desc: '+35% hero attack per level', perLevel: 0.35, maxLevel: 5 },
-  regen: { name: 'Accelerated regeneration', target: 'hero', desc: '+0.8 HP/s per level', perLevel: 0.8, maxLevel: 5 },
-  adaptation: { name: 'Collective adaptation', target: 'cells', desc: '+30% cells max health per level', perLevel: 0.3, maxLevel: 5 },
-  sync: { name: 'Synchronization', target: 'cells', desc: '+20% cells attack speed per level', perLevel: 0.2, maxLevel: 5 },
-  swift: { name: 'Enhanced motility', target: 'hero', desc: '+8% hero move speed per level', perLevel: 0.08, maxLevel: 5 },
+  pulse: { name: 'Усиленный пульс', target: 'hero', desc: '+35% к атаке героя за уровень', perLevel: 0.35, maxLevel: 5 },
+  regen: { name: 'Ускоренная регенерация', target: 'hero', desc: '+0.8 HP/с за уровень', perLevel: 0.8, maxLevel: 5 },
+  adaptation: { name: 'Общая адаптация', target: 'cells', desc: '+30% к здоровью клеток за уровень', perLevel: 0.3, maxLevel: 5 },
+  sync: { name: 'Синхронизация', target: 'cells', desc: '+20% к скорости атаки клеток за уровень', perLevel: 0.2, maxLevel: 5 },
+  swift: { name: 'Быстрая подвижность', target: 'hero', desc: '+8% к скорости героя за уровень', perLevel: 0.08, maxLevel: 5 },
   // Рой: +1 к лимиту содружественных клеток под контролем за уровень.
-  swarm: { name: 'Swarm', target: 'colony', desc: '+1 friendly cell slot', perLevel: 1, maxLevel: 2 }
+  swarm: { name: 'Рой', target: 'colony', desc: '+1 слот дружественной клетки', perLevel: 1, maxLevel: 2 }
 };
 
 /* ------------------------------------------------- наросты (добыча) */

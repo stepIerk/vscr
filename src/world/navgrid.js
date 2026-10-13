@@ -7,6 +7,8 @@
  * - lineOfSight() for greedy path smoothing.
  */
 
+import { pointInPoly, minDistToPoly } from './organic.js';
+
 const DIRS = [
   [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
   [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2]
@@ -64,6 +66,10 @@ function pointInRect(x, y, r, pad = 0) {
   return x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
 }
 
+// Контуры из общего модуля organic.js: если комнаты уже получили рисуемые
+// полигоны (room.shape.floor), сетка строится по ним — пути совпадают
+// с видимой плотью, а не с прямоугольниками генератора.
+
 export class NavGrid {
   /**
    * @param {object} layout generator layout (rooms/floors/solids/bounds)
@@ -80,10 +86,30 @@ export class NavGrid {
     this.rows = Math.ceil(b.h / cell);
     const walk = new Uint8Array(this.cols * this.rows);
     const t0 = performance.now();
+    // Портальный режим после отрисовки: у комнат есть room.shape.floor —
+    // проходимость считаем по рисуемому контуру (иначе пути ведут в кайму).
+    const usePoly = !!(layout.rooms && layout.rooms.some((r) => r.shape && r.shape.floor));
+    const obstacles = usePoly ? layout.rooms.flatMap((r) => r.obstacles || []) : null;
     for (let r = 0; r < this.rows; r++) {
       const y = b.y + (r + 0.5) * cell;
       for (let c = 0; c < this.cols; c++) {
         const x = b.x + (c + 0.5) * cell;
+        if (usePoly) {
+          let ok = false;
+          for (const rm of layout.rooms) {
+            if (!pointInRect(x, y, rm, 0)) continue; // дешёвый отсев до полигона
+            const poly = rm.shape && rm.shape.floor;
+            if (!poly) continue;
+            if (pointInPoly(x, y, poly) && minDistToPoly(poly, x, y) >= pad) { ok = true; break; }
+          }
+          if (!ok) continue;
+          let blocked = false;
+          for (const s of obstacles) {
+            if (pointInRect(x, y, s, pad)) { blocked = true; break; }
+          }
+          if (!blocked) walk[r * this.cols + c] = 1;
+          continue;
+        }
         let floor = false;
         for (const f of layout.floors) {
           if (pointInRect(x, y, f, 0)) { floor = true; break; }
