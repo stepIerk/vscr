@@ -58,31 +58,16 @@
         </span>
       </button>
 
-      <!-- Нижняя командная панель: колония, гекс-слоты, инвентарь -->
+      <!-- Нижняя командная панель: только гекс-слоты клеток -->
       <div id="bottom-bar" class="bottom-bar win">
-        <div class="strip-head">
-          <span class="win-dot"></span>
-          <span class="strip-title">КЛЕТКИ</span>
-          <span id="colony-count" class="strip-count">0/5</span>
-          <span id="colony-note" class="strip-note hidden"></span>
-        </div>
         <div id="colony-strip" class="colony-strip"></div>
-        <div class="bar-row">
-          <button id="colony-btn" type="button" class="bar-btn bar-main">
-            <span class="bar-ico">⬡</span>
-            <span class="bar-txt">
-              <b>КОЛОНИЯ</b>
-              <i>скрещивание · мутации</i>
-            </span>
-          </button>
-          <div id="bar-hint" class="bar-hint">WASD / стрелки — движение · атака сама · E — купить у стенда</div>
-          <button id="artifacts-btn" type="button" class="bar-btn bar-inv">
-            <span class="bar-ico">▦</span>
-            <span class="inv-count" id="inv-count">0/5</span>
-            <span class="bar-cap">ИНВ</span>
-          </button>
-        </div>
       </div>
+
+      <!-- Плавающие кнопки над нижним баром: сбор/роспуск слева, инвентарь справа -->
+      <button id="gather-btn" type="button" class="fab-btn fab-gather hidden" aria-label="Сбор колонии"></button>
+      <button id="artifacts-btn" type="button" class="fab-btn fab-inv" aria-label="Инвентарь артефактов">
+        <span class="inv-count" id="inv-count">0/5</span>
+      </button>
 
       <!-- Джойстик: подсказка + плавающее кольцо, живёт только на тач-устройствах -->
       <div id="touch-ui" class="touch-ui hidden">

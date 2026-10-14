@@ -51,6 +51,7 @@ const TEX = {
   'enemy-a': 'enemy-a',
   'enemy-b': 'enemy-b',
   'enemy-c': 'enemy-c',
+  'enemy-d': 'enemy-d',
   'boss-0': 'boss-0',
   'boss-1': 'boss-1',
   foe: 'foe',
@@ -65,10 +66,14 @@ const TEX = {
   'cell-defender-3': 'cell-defender-3',
   'cell-parasite-1': 'cell-parasite-1',
   'cell-parasite-2': 'cell-parasite-2',
-  'cell-parasite-3': 'cell-parasite-3'
+  'cell-parasite-3': 'cell-parasite-3',
+  'cell-medic': 'cell-medic',
+  'cell-medic-1': 'cell-medic-1',
+  'cell-medic-2': 'cell-medic-2',
+  'cell-medic-3': 'cell-medic-3'
 };
 
-const TEX_SIZE = { dot: 8, player: 40, shell: 56, bullet: 16, foe: 20, mote: 20, plasma: 24, growth: 48, stand: 64, coin: 20, relic: 28, tonic: 24, portal: 56, 'enemy-a': 32, 'enemy-b': 36, 'enemy-c': 48, 'boss-0': 96, 'boss-1': 96, 'cell-hunter': 28, 'cell-defender': 36, 'cell-parasite': 24, 'cell-hunter-1': 28, 'cell-hunter-2': 28, 'cell-hunter-3': 28, 'cell-defender-1': 36, 'cell-defender-2': 36, 'cell-defender-3': 36, 'cell-parasite-1': 24, 'cell-parasite-2': 24, 'cell-parasite-3': 24 };
+const TEX_SIZE = { dot: 8, player: 40, shell: 56, bullet: 16, foe: 20, mote: 20, plasma: 24, growth: 48, stand: 64, coin: 20, relic: 28, tonic: 24, portal: 56, 'enemy-a': 32, 'enemy-b': 36, 'enemy-c': 48, 'enemy-d': 40, 'boss-0': 96, 'boss-1': 96, 'cell-hunter': 28, 'cell-defender': 36, 'cell-parasite': 24, 'cell-hunter-1': 28, 'cell-hunter-2': 28, 'cell-hunter-3': 28, 'cell-defender-1': 36, 'cell-defender-2': 36, 'cell-defender-3': 36, 'cell-parasite-1': 24, 'cell-parasite-2': 24, 'cell-parasite-3': 24, 'cell-medic': 30, 'cell-medic-1': 30, 'cell-medic-2': 30, 'cell-medic-3': 30 };
 
 /** Текстура клетки по виду и уровню слияния (уровни сложнее с каждым). */
 function allyTexKey(type, merge) {
@@ -431,6 +436,48 @@ function ensureTextures(scene) {
     g.destroy();
   }
 
+  // Enemy D: игломёт (дальнобойный). Ядовитая железа: вздутый мешок,
+  // венец игл наружу и зев-дуло по центру. Только синяк-фиолет, белого нет.
+  if (!scene.textures.exists(TEX['enemy-d'])) {
+    const s = TEX_SIZE['enemy-d'];
+    const g = scene.add.graphics();
+    const c = s / 2;
+    const r = s / 2 - 8;
+    // Венец игл (под телом).
+    g.lineStyle(2.5, COLORS.tissueDark, 1);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + 0.15;
+      g.lineBetween(c + Math.cos(a) * (r - 2), c + Math.sin(a) * (r - 2),
+        c + Math.cos(a) * (r + 6), c + Math.sin(a) * (r + 6));
+    }
+    // Вздутое тело железы.
+    g.fillStyle(COLORS.enemyD, 1);
+    g.fillCircle(c, c, r);
+    g.lineStyle(2.5, COLORS.tissueDark, 1);
+    g.strokeCircle(c, c, r);
+    // Внутренняя пульсация: тёмное кольцо.
+    g.lineStyle(2, COLORS.tissueDeep, 0.9);
+    g.strokeCircle(c, c, r - 5);
+    // Зев-дуло: тёмная дыра с влажным валиком.
+    g.fillStyle(COLORS.tissueDark, 1);
+    g.fillCircle(c, c, 6);
+    g.fillStyle(COLORS.holeDeep, 1);
+    g.fillCircle(c, c, 4);
+    g.lineStyle(1.5, COLORS.tissueWet, 0.7);
+    g.strokeCircle(c, c, 7);
+    // Капли яда на иглах.
+    g.fillStyle(COLORS.enemyD, 1);
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + 0.6;
+      g.fillCircle(c + Math.cos(a) * (r + 5), c + Math.sin(a) * (r + 5), 1.6);
+    }
+    // Влажный блик мембраны.
+    g.fillStyle(COLORS.tissueWet, 0.4);
+    g.fillCircle(c - 6, c - 7, 3.5);
+    g.generateTexture(TEX['enemy-d'], s, s);
+    g.destroy();
+  }
+
   // Боссы: мясистая утроба с зубцами (maw) и костяной «хор» с ресничным венцом.
   BOSS.defs.forEach((def, i) => {
     const key = TEX[`boss-${i}`];
@@ -527,7 +574,7 @@ function ensureTextures(scene) {
 
   // Friendly cells: distinct silhouettes, never red (enemies stay red).
   // Каждый уровень слияния чуть сложнее: кольца, шипы, яркое ядро.
-  for (const type of ['hunter', 'defender', 'parasite']) {
+  for (const type of ['hunter', 'defender', 'parasite', 'medic']) {
     for (let lv = 1; lv <= 3; lv++) {
       const key = TEX[`cell-${type}-${lv}`];
       if (!key || scene.textures.exists(key)) continue;
@@ -545,57 +592,87 @@ function ensureTextures(scene) {
  * тёмный корпус + акцент роли + белая обводка (белый = «свой», у врагов его нет).
  * Уровни слияния: lv2 — панели/болты, lv3 — гало и яркое ядро.
  */
+/**
+ * Клетки колонии — мини-микроботы той же машинной семьи, что и герой:
+ * тёмный корпус + акцент роли + белая обводка (белый = «свой»).
+ * Уровень слияния меняет силуэт: lv2 добавляет лезвия/накладки/лапы,
+ * lv3 — хвостовые булы, внешние пластины, корону шипов и гало.
+ */
 function drawAllyCell(g, s, type, lv) {
   const c = s / 2;
   const BODY = COLORS.machineBody;
   const MARK = COLORS.machineMark;
+  /** Точка по углу и расстоянию от центра. */
+  const P = (a, r) => ({ x: c + Math.cos(a) * r, y: c + Math.sin(a) * r });
 
   if (type === 'hunter') {
     const accent = ALLY_TYPES.hunter.tint;
-    // Дротик-охотник: остриё вверх, сведённые крылья.
+    // Корпус-трапеция носом вверх.
     const hull = [
-      { x: c, y: 2 },
+      { x: c - 4, y: s - 12 },
+      { x: c + 4, y: s - 12 },
       { x: c + 9, y: s - 3 },
-      { x: c, y: s - 8 },
       { x: c - 9, y: s - 3 }
     ];
     g.fillStyle(BODY, 1);
     g.fillPoints(hull, true);
     // Акцентная панель-кокпит.
-    g.fillStyle(accent, 0.9);
+    g.fillStyle(accent, 0.88);
     g.fillPoints([
-      { x: c, y: 5.5 },
-      { x: c + 5, y: s - 6.5 },
-      { x: c, y: s - 10 },
-      { x: c - 5, y: s - 6.5 }
+      { x: c, y: s - 12.5 },
+      { x: c + 4.5, y: s - 6.5 },
+      { x: c, y: s - 4 },
+      { x: c - 4.5, y: s - 6.5 }
     ], true);
     g.lineStyle(2, MARK, 1);
     g.strokePoints(hull, true);
-    // Двигательные пазы сзади.
-    g.lineStyle(1.5, MARK, 0.75);
-    g.lineBetween(c - 5, s - 4, c - 7, s - 1);
-    g.lineBetween(c + 5, s - 4, c + 7, s - 1);
+    // Загнутые плавники-крылья.
+    g.lineStyle(2.5, MARK, 1);
+    g.lineBetween(c - 4, s - 12, c - 9.5, s - 18.5);
+    g.lineBetween(c + 4, s - 12, c + 9.5, s - 18.5);
+    g.fillStyle(accent, 1);
+    g.fillCircle(c - 9.5, s - 18.5, 1.4);
+    g.fillCircle(c + 9.5, s - 18.5, 1.4);
     // Ядро-индикатор.
     g.fillStyle(COLORS.machineGlow, lv >= 3 ? 1 : 0.95);
-    g.fillCircle(c, c + 1, lv >= 3 ? 2.6 : 2);
+    g.fillCircle(c, c + 3, lv >= 3 ? 2.6 : 2.2);
     g.fillStyle(0xffffff, 1);
-    g.fillCircle(c, c + 1, lv >= 2 ? 1.1 : 0.8);
+    g.fillCircle(c, c + 3, lv >= 2 ? 1.1 : 0.8);
     if (lv >= 2) {
-      // Внутренний контур + болты в крыльях.
-      g.lineStyle(1, MARK, 0.4);
+      // Боковые лезвия: силуэт становится шире.
+      g.lineStyle(2, MARK, 0.95);
+      g.lineBetween(c - 8.5, s - 6, c - 12.5, s - 8.5);
+      g.lineBetween(c + 8.5, s - 6, c + 12.5, s - 8.5);
+      g.fillStyle(accent, 1);
+      g.fillCircle(c - 12.5, s - 8.5, 1.2);
+      g.fillCircle(c + 12.5, s - 8.5, 1.2);
+      // Внутренний контур корпуса.
+      g.lineStyle(1, MARK, 0.35);
       g.strokePoints([
-        { x: c, y: 4.5 },
-        { x: c + 7, y: s - 4 },
-        { x: c, y: s - 9 },
-        { x: c - 7, y: s - 4 }
+        { x: c - 2.5, y: s - 11 },
+        { x: c + 2.5, y: s - 11 },
+        { x: c + 6.5, y: s - 4.5 },
+        { x: c - 6.5, y: s - 4.5 }
       ], true);
-      g.fillStyle(MARK, 0.9);
-      g.fillCircle(c - 6.5, s - 4.5, 1.2);
-      g.fillCircle(c + 6.5, s - 4.5, 1.2);
     }
     if (lv >= 3) {
-      // Гало-кольцо акцента вокруг дротика.
-      g.lineStyle(1.5, accent, 0.45);
+      // Хвостовые булы: силуэт вытягивается назад.
+      g.lineStyle(2, MARK, 0.9);
+      g.lineBetween(c - 5.5, s - 3, c - 8.5, s - 1);
+      g.lineBetween(c + 5.5, s - 3, c + 8.5, s - 1);
+      g.fillStyle(accent, 0.85);
+      g.fillPoints([
+        { x: c - 8.5, y: s - 1 },
+        { x: c - 5.5, y: s - 3 },
+        { x: c - 6.5, y: s - 1 }
+      ], true);
+      g.fillPoints([
+        { x: c + 8.5, y: s - 1 },
+        { x: c + 5.5, y: s - 3 },
+        { x: c + 6.5, y: s - 1 }
+      ], true);
+      // Гало вокруг дрона.
+      g.lineStyle(1.5, accent, 0.4);
       g.strokeCircle(c, c, c - 1.5);
     }
   } else if (type === 'defender') {
@@ -621,53 +698,129 @@ function drawAllyCell(g, s, type, lv) {
     g.fillStyle(0xffffff, 1);
     g.fillCircle(c, c, lv >= 2 ? 1.6 : 1.2);
     if (lv >= 2) {
-      // Болты по шести вершинам.
+      // Усиленная кромка: накладки по граням + болты по вершинам.
+      g.lineStyle(2.5, MARK, 0.95);
+      for (let i = 0; i < 6; i++) {
+        const a = -Math.PI / 2 + ((i + 0.5) / 6) * Math.PI * 2;
+        const p1 = P(a, r * 0.92);
+        const p2 = P(a, r * 1.1);
+        g.lineBetween(p1.x, p1.y, p2.x, p2.y);
+      }
       g.fillStyle(MARK, 0.95);
-      for (const p of hull) g.fillCircle(p.x, p.y, 1.6);
-      g.lineStyle(1.5, MARK, 0.5);
-      g.strokePoints(polyN(c, c, r * 0.88, 6), true);
+      for (const p of hull) g.fillCircle(p.x, p.y, 1.5);
+      g.lineStyle(1.5, MARK, 0.45);
+      g.strokePoints(polyN(c, c, r * 0.86, 6), true);
     }
     if (lv >= 3) {
-      // Внешнее гало.
+      // Внешние пластины-щиты по граням + гало.
+      g.fillStyle(accent, 0.9);
+      for (let i = 0; i < 6; i++) {
+        const a = -Math.PI / 2 + ((i + 0.5) / 6) * Math.PI * 2;
+        g.fillPoints([
+          P(a - 0.16, r * 0.95),
+          P(a + 0.16, r * 0.95),
+          P(a + 0.12, r * 1.06),
+          P(a - 0.12, r * 1.06)
+        ], true);
+      }
       g.lineStyle(1.5, accent, 0.45);
-      g.strokeCircle(c, c, r + 1.5);
+      g.strokeCircle(c, c, r * 1.12);
     }
-  } else {
-    const accent = ALLY_TYPES.parasite.tint;
-    // Манипуляторы (под телом капсулы).
-    g.lineStyle(2, MARK, 0.85);
-    for (const a of [Math.PI / 2, (Math.PI * 7) / 6, (Math.PI * 11) / 6]) {
-      g.lineBetween(c + Math.cos(a) * 6, c + Math.sin(a) * 6,
-        c + Math.cos(a) * 11, c + Math.sin(a) * 11);
+  } else if (type === 'medic') {
+    const accent = ALLY_TYPES.medic.tint;
+    // Медик — ремонтный дрон: круглый корпус-капсула с янтарным крестом.
+    // lv1: капсула + крест + антенна. lv2: боковые манипуляторы-захваты.
+    // lv3: рой нанитов по орбите + гало.
+    if (lv >= 2) {
+      // Манипуляторы-захваты (под корпусом): две угловые «клешни».
+      g.lineStyle(2, MARK, 0.9);
+      g.lineBetween(c - 6, c + 4, c - 11, c + 8);
+      g.lineBetween(c - 11, c + 8, c - 11, c + 11);
+      g.lineBetween(c + 6, c + 4, c + 11, c + 8);
+      g.lineBetween(c + 11, c + 8, c + 11, c + 11);
+      g.fillStyle(accent, 1);
+      g.fillCircle(c - 11, c + 11, 1.4);
+      g.fillCircle(c + 11, c + 11, 1.4);
     }
     // Капсула.
     g.fillStyle(BODY, 1);
     g.fillCircle(c, c, 8);
     g.lineStyle(2, MARK, 1);
     g.strokeCircle(c, c, 8);
+    // Янтарный крест.
+    g.fillStyle(accent, 1);
+    g.fillRect(c - 2, c - 5.5, 4, 11);
+    g.fillRect(c - 5.5, c - 2, 11, 4);
+    // Ядро-индикатор в центре креста.
+    g.fillStyle(COLORS.machineGlow, 1);
+    g.fillCircle(c, c, lv >= 3 ? 2 : 1.6);
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(c, c, lv >= 2 ? 1 : 0.7);
+    // Антенна со светодиодом.
+    g.lineStyle(1.5, MARK, 0.9);
+    g.lineBetween(c + 4, c - 6, c + 7, c - 10.5);
+    g.fillStyle(accent, 1);
+    g.fillCircle(c + 7, c - 10.5, 1.5);
+    if (lv >= 3) {
+      // Рой нанитов: три точки по орбите + гало.
+      g.fillStyle(accent, 0.95);
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+        g.fillCircle(c + Math.cos(a) * 11.5, c + Math.sin(a) * 11.5, 1.5);
+      }
+      g.lineStyle(1, MARK, 0.5);
+      g.strokeCircle(c, c, 11.5);
+      g.lineStyle(1.5, accent, 0.4);
+      g.strokeCircle(c, c, c - 1.5);
+    }
+  } else {
+    const accent = ALLY_TYPES.parasite.tint;
+    // Лапы-манипуляторы (рисуются под телом капсулы).
+    const legAngles = lv >= 2
+      ? [Math.PI / 6, Math.PI / 2, (Math.PI * 5) / 6, (Math.PI * 7) / 6, (Math.PI * 11) / 6]
+      : [Math.PI / 2, (Math.PI * 7) / 6, (Math.PI * 11) / 6];
+    const legOut = lv >= 3 ? 11.5 : 10.5;
+    g.lineStyle(2, MARK, 0.9);
+    for (const a of legAngles) {
+      const p1 = P(a, 6);
+      const p2 = P(a, legOut);
+      g.lineBetween(p1.x, p1.y, p2.x, p2.y);
+    }
+    // Капсула.
+    g.fillStyle(BODY, 1);
+    g.fillCircle(c, c, 7.5);
+    g.lineStyle(2, MARK, 1);
+    g.strokeCircle(c, c, 7.5);
     // Акцентное кольцо и присоска.
     g.lineStyle(lv >= 2 ? 2.5 : 2, accent, 1);
-    g.strokeCircle(c, c, 5.5);
+    g.strokeCircle(c, c, 5.2);
     g.fillStyle(0x04090e, 1);
-    g.fillCircle(c, c, 3);
+    g.fillCircle(c, c, 2.8);
     g.fillStyle(COLORS.machineGlow, 1);
     g.fillCircle(c, c, lv >= 3 ? 1.8 : 1.4);
     if (lv >= 2) {
-      // Акцентные «подошвы» на концах манипуляторов.
+      // Дорсальные шипы: колючий силуэт.
+      g.lineStyle(2, MARK, 0.9);
+      g.lineBetween(c - 3, c - 5.5, c - 4.5, c - 9.5);
+      g.lineBetween(c + 3, c - 5.5, c + 4.5, c - 9.5);
+      // Акцентные «подошвы» на лапах.
       g.fillStyle(accent, 1);
-      for (const a of [Math.PI / 2, (Math.PI * 7) / 6, (Math.PI * 11) / 6]) {
-        g.fillCircle(c + Math.cos(a) * 11, c + Math.sin(a) * 11, 1.5);
+      for (const a of legAngles) {
+        const p = P(a, legOut);
+        g.fillCircle(p.x, p.y, 1.4);
       }
     }
     if (lv >= 3) {
-      // Корона из точек + второй белый контур.
-      g.fillStyle(accent, 0.9);
-      for (let k = 0; k < 6; k++) {
-        const a = -Math.PI / 2 + (k / 6) * Math.PI * 2;
-        g.fillCircle(c + Math.cos(a) * 10.5, c + Math.sin(a) * 10.5, 1.3);
+      // Корона шипов + второй белый контур.
+      g.lineStyle(1.8, MARK, 0.95);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const p1 = P(a, 7);
+        const p2 = P(a, 11.5);
+        g.lineBetween(p1.x, p1.y, p2.x, p2.y);
       }
       g.lineStyle(1, MARK, 0.5);
-      g.strokeCircle(c, c, 9.5);
+      g.strokeCircle(c, c, 9);
       g.fillStyle(0xffffff, 1);
       g.fillCircle(c, c, 1);
     }
@@ -687,6 +840,7 @@ export class GameScene extends Phaser.Scene {
     this.hero = null; // cached computed hero stats (dirty-flagged by cards)
     this.hp = HERO_BASE.maxHealth;
     this.kills = 0;
+    this.bossesBeaten = 0; // игломёты открываются после второго босса
     this.motes = 0;
     this.elapsedMs = 0;
     this.fireAcc = 0;
@@ -700,6 +854,7 @@ export class GameScene extends Phaser.Scene {
     this.lastHudKills = -1;
     this.lastHudMotes = -1;
     this.lastHudPlasma = -1;
+    this.lastHudBio = -1;
     this.lastHudArtifacts = -1;
     this.lastHudLevel = -1;
     this.lastHudXp = -1;
@@ -707,6 +862,7 @@ export class GameScene extends Phaser.Scene {
     this.markers = []; // pending spawn telegraphs {view, timer, roomId}
     this.joyVec = { x: 0, y: 0 }; // virtual stick (touch); consumed in updateMovement
     this.stashedCells = []; // colony hidden for boss fights (data kept, views gone)
+    this.gatherMode = false; // сбор: клетки сходятся к герою, врагов игнорируют
     this.bossActive = null; // roomId of the running boss fight (null = none)
     this.retryAcc = 0;
     this.expandAcc = 0;
@@ -1901,7 +2057,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   spawnEnemyAt(x, y, roomId) {
-    const type = pickEnemyType();
+    // Игломёт — только после второго босса; остальные типы доступны всегда.
+    const pool = ENEMIES.types.filter((t) => (t.minBosses || 0) <= this.bossesBeaten);
+    const type = pickEnemyType(Math.random, pool.length ? pool : ENEMIES.types);
     const e = this.enemies.create(x, y, type.key);
     if (!e) return;
     e.setDepth(4);
@@ -1929,9 +2087,10 @@ export class GameScene extends Phaser.Scene {
 
   /** Колония прячется на время боя с боссом (данные целы, виды снесены). */
   stashColony() {
+    this.gatherMode = false; // некому собирать — клетки убраны
     this.stashedCells = this.run.cells.splice(0);
     for (const cell of this.stashedCells) this.destroyAllyView(cell.id);
-    ui.setColonyCount(this.run.cells.length, this.run.maxCells);
+    ui.setGather({ hasCells: false, active: false });
     this.refreshColonyStrip();
   }
 
@@ -1945,7 +2104,6 @@ export class GameScene extends Phaser.Scene {
       cell.path = null;
       this.spawnAllyView(cell);
     }
-    ui.setColonyCount(this.run.cells.length, this.run.maxCells);
     this.refreshColonyStrip();
   }
 
@@ -2213,9 +2371,13 @@ export class GameScene extends Phaser.Scene {
     }
     this.restoreColony();
     this.pendingLevels += BOSS.rewardLevels;
+    this.bossesBeaten += 1;
     this.pushHud();
     if (room) this.checkRoomCleared(room);
     ui.toast(`Босс «${name}» повержен! +${BOSS.rewardLevels} уровня · +${BOSS.rewardPlasma} плазмы`);
+    if (this.bossesBeaten === 2) {
+      ui.toast('Ткань мутирует: в глубине завелись Игломёты — держат дистанцию и плюются иглами', 5000);
+    }
     if (!this.isGameOver) this.openDraft();
   }
 
@@ -2647,6 +2809,11 @@ export class GameScene extends Phaser.Scene {
       const len = Math.hypot(dx, dy) || 1;
       // Stop at attack range + small margin so bodies never visually overlap.
       const range = e.getData('radius') * 0.8 + tgt.r + 4;
+      // Игломёт: держит дистанцию и плюётся иглами; в упор — обычный укус.
+      if (e.getData('typeKey') === ENEMIES.shooter.key && len > range) {
+        this.updateShooter(e, tgt, dx, dy, len, dt);
+        continue;
+      }
       if (len > range) {
         this.steerEnemy(e, tgt.x, tgt.y, e.getData('speed'), dt);
         e.rotation += 0.015;
@@ -2741,6 +2908,34 @@ export class GameScene extends Phaser.Scene {
     const nx = dx / len;
     const ny = dy / len;
     e.setVelocity((nx - ny * wob) * speed, (ny + nx * wob) * speed);
+  }
+
+  /**
+   * Игломёт: подходит к комфортной дистанции, пятится в упор,
+   * на дистанции — плевок иглой из общего пула снарядов боссов.
+   */
+  updateShooter(e, tgt, dx, dy, len, dt) {
+    const def = ENEMIES.shooter;
+    const speed = e.getData('speed');
+    if (len > def.shootRange + 60) {
+      this.steerEnemy(e, tgt.x, tgt.y, speed, dt);
+      e.rotation += 0.015;
+      return;
+    }
+    if (len < def.shootRange - 90) {
+      // Пятится от цели, не разворачиваясь.
+      e.setVelocity(-(dx / len) * speed * 0.55, -(dy / len) * speed * 0.55);
+      return;
+    }
+    e.setVelocity(0, 0);
+    const cd = (e.getData('shotCd') || 0) + dt;
+    if (cd >= def.shotCooldownMs) {
+      e.setData('shotCd', 0);
+      this.foeShot(e.x, e.y, Math.atan2(dy, dx), def.shotSpeed, def.shotDmg);
+      this.hitSparks.explode(3, e.x, e.y);
+    } else {
+      e.setData('shotCd', cd);
+    }
   }
 
   /** One melee swing at the resolved target (single delivery path). */
@@ -2848,6 +3043,7 @@ export class GameScene extends Phaser.Scene {
       const dy = m.y - py;
       if (dx * dx + dy * dy < r2) {
         this.motes += 1;
+        this.run.addBiomass(1); // биоматериал: валюта колонии (слияния)
         this.moteSparks.explode(6, m.x, m.y);
         m.destroy();
         // Биомасса — опыт: излишек за порогом уровня сохраняется.
@@ -2885,12 +3081,14 @@ export class GameScene extends Phaser.Scene {
     const hs = this.heroStats();
     const hpChanged = Math.abs(this.hp - this.lastHudHp) >= 0.5;
     const plasmaChanged = this.lastHudPlasma !== this.run.plasma;
-    if (hpChanged || this.kills !== this.lastHudKills || this.motes !== this.lastHudMotes || plasmaChanged) {
+    const bioChanged = this.lastHudBio !== this.run.biomass; // баланс биоматериала
+    if (hpChanged || this.kills !== this.lastHudKills || this.motes !== this.lastHudMotes || plasmaChanged || bioChanged) {
       this.lastHudHp = this.hp;
       this.lastHudKills = this.kills;
       this.lastHudMotes = this.motes;
       this.lastHudPlasma = this.run.plasma;
-      ui.update(this.hp, hs.maxHealth, this.kills, this.motes, this.run.plasma);
+      this.lastHudBio = this.run.biomass;
+      ui.update(this.hp, hs.maxHealth, this.kills, this.run.biomass, this.run.plasma);
     }
     if (this.run.level !== this.lastHudLevel || this.run.xp !== this.lastHudXp) {
       this.lastHudLevel = this.run.level;
@@ -2910,7 +3108,12 @@ export class GameScene extends Phaser.Scene {
     if (this.modalOpen || this.isGameOver || this.pendingLevels <= 0) return;
     this.modalOpen = true;
     ui.hideAction();
-    this.draftCards = this.run.draftOptions().map((c) => describeCard(c, this.run));
+    this.draftCards = this.run.draftOptions().map((c) => {
+      const d = describeCard(c, this.run);
+      // Клетка — спрайт как в игре; мутации и улучшения рисуют свои иконки.
+      if (c.kind === 'cell') d.img = this.texDataURL(allyTexKey(c.cellType, 1));
+      return d;
+    });
     panels.showDraft({
       level: this.run.level,
       cards: this.draftCards,
@@ -2970,7 +3173,12 @@ export class GameScene extends Phaser.Scene {
     this.pushHud();
     if (this.pendingLevels > 0 && !this.isGameOver) {
       // Chain: next level's draft while staying paused.
-      this.draftCards = this.run.draftOptions().map((c) => describeCard(c, this.run));
+      this.draftCards = this.run.draftOptions().map((c) => {
+        const d = describeCard(c, this.run);
+        // Клетка — спрайт как в игре; мутации и улучшения рисуют свои иконки.
+        if (c.kind === 'cell') d.img = this.texDataURL(allyTexKey(c.cellType, 1));
+        return d;
+      });
       panels.showDraft({
         level: this.run.level,
         cards: this.draftCards,
@@ -2994,6 +3202,20 @@ export class GameScene extends Phaser.Scene {
     }, 0);
   }
 
+  /** Сбор/роспуск колонии: клетки сходятся к герою и игнорируют врагов. */
+  toggleGatherMode() {
+    if (this.isGameOver || this.run.cells.length === 0) return;
+    this.gatherMode = !this.gatherMode;
+    // Сброс целей, чтобы клетки сразу развернулись к герою.
+    for (const cell of this.run.cells) {
+      cell.target = null;
+      cell.cd = 0;
+      if (cell.path) { cell.path.pts = null; cell.path.cd = 0; }
+      cell.orbit = null;
+    }
+    ui.setGather({ hasCells: true, active: this.gatherMode });
+  }
+
   closeColony() {
     panels.hideColony();
     this.modalOpen = false;
@@ -3003,6 +3225,7 @@ export class GameScene extends Phaser.Scene {
   renderColony() {
     panels.showColony(this.colonySnapshot(), {
       onMerge: (aId, bId) => this.doMerge(aId, bId),
+      onSplit: (id) => this.doSplit(id),
       onClose: () => this.closeColony()
     });
   }
@@ -3022,6 +3245,10 @@ export class GameScene extends Phaser.Scene {
 
   /** Гекс-лента колонии внизу: картинки, бейдж уровня, полоски здоровья. */
   refreshColonyStrip() {
+    ui.setGather({
+      hasCells: this.run.cells.length > 0 && !this.isGameOver,
+      active: this.gatherMode
+    });
     ui.renderColonyStrip(
       {
         hero: { level: this.run.level, xp: this.run.xp, req: this.run.requiredXp(), hp: this.hp, maxHp: this.heroStats().maxHealth },
@@ -3053,6 +3280,27 @@ export class GameScene extends Phaser.Scene {
     this.renderColony();
     this.refreshColonyStrip();
     this.pushHud();
+    return true;
+  }
+
+  /** Расщепить клетку на биоматериал (из окна колонии). */
+  doSplit(id) {
+    const cell = this.run.getCell(id);
+    if (!cell) return false;
+    const gained = this.run.splitCell(id);
+    if (gained == null) return false;
+    const v = this.allyViews.get(id);
+    const x = v ? v.sprite.x : this.player.x;
+    const y = v ? v.sprite.y : this.player.y;
+    this.deathSparks.explode(12, x, y);
+    this.moteSparks.explode(8, x, y);
+    this.destroyAllyView(id);
+    this.dirtyHero();
+    ui.setColonyCount(this.run.cells.length, this.run.maxCells);
+    this.renderColony();
+    this.refreshColonyStrip();
+    this.pushHud();
+    ui.toast(`Клетка расщеплена · +${gained} биоматериала`);
     return true;
   }
 
@@ -3146,12 +3394,13 @@ export class GameScene extends Phaser.Scene {
     const st = this.run.computeCell(cell);
     const br = st.bodyR * 0.8;
     img.body.setCircle(br, size / 2 - br, size / 2 - br);
-    img.setScale(1 + 0.12 * (cell.merge - 1));
+    img.setScale(1 + ALLIES.scalePerMerge * (cell.merge - 1)); // клетка растёт с уровнем
     img.setData('cellId', cell.id);
-    const barBg = this.add.rectangle(spot.x, spot.y - 22, 30, 4, 0x0a0f0e, 0.85).setDepth(8);
-    const bar = this.add.rectangle(spot.x, spot.y - 22, 30, 4, 0x3ddc84, 1).setDepth(8);
+    const lift = 22 + 5 * (cell.merge - 1); // полоска выше у выросших клеток
+    const barBg = this.add.rectangle(spot.x, spot.y - lift, 30, 4, 0x0a0f0e, 0.85).setDepth(8);
+    const bar = this.add.rectangle(spot.x, spot.y - lift, 30, 4, 0x3ddc84, 1).setDepth(8);
     const badge = this.add
-      .text(spot.x, spot.y - 38, MERGE_BADGE[Math.min(cell.merge, MERGE_BADGE.length) - 1] || 'I', {
+      .text(spot.x, spot.y - 38 - 5 * (cell.merge - 1), MERGE_BADGE[Math.min(cell.merge, MERGE_BADGE.length) - 1] || 'I', {
         fontFamily: 'monospace', fontSize: '12px', color: '#9dffb0',
         backgroundColor: 'rgba(5,7,10,0.7)', padding: { x: 4, y: 2 }
       })
@@ -3177,7 +3426,7 @@ export class GameScene extends Phaser.Scene {
     v.badge.setText(MERGE_BADGE[Math.min(cell.merge, MERGE_BADGE.length) - 1] || 'I');
     v.badge.setVisible(cell.merge > 1);
     v.sprite.setTexture(allyTexKey(cell.type, cell.merge)); // вид растёт с уровнем
-    v.sprite.setScale(1 + 0.12 * (cell.merge - 1));
+    v.sprite.setScale(1 + ALLIES.scalePerMerge * (cell.merge - 1));
     this.refreshColonyStrip();
   }
 
@@ -3224,6 +3473,46 @@ export class GameScene extends Phaser.Scene {
     return best;
   }
 
+  /**
+   * Медик: лечит самую раненую цель в радиусе (герой или клетка).
+   * Сила лечения = атака клетки, растёт со слияниями и мутациями.
+   */
+  medicHeal(cell, st) {
+    const v = this.allyViews.get(cell.id);
+    const sx = v ? v.sprite.x : this.player.x;
+    const sy = v ? v.sprite.y : this.player.y;
+    const radius = st.range;
+    let best = null; // {apply(amount), frac, x, y, missing}
+    const heroMax = this.heroStats().maxHealth;
+    if (this.hp < heroMax && Math.hypot(this.player.x - sx, this.player.y - sy) <= radius) {
+      best = {
+        frac: this.hp / heroMax, x: this.player.x, y: this.player.y,
+        missing: heroMax - this.hp,
+        apply: (n) => { this.hp = Math.min(heroMax, this.hp + n); }
+      };
+    }
+    for (const other of this.run.cells) {
+      if (other.id === cell.id) continue;
+      const ost = this.run.computeCell(other);
+      const ohp = Math.max(0, other.hp == null ? ost.maxHealth : other.hp);
+      if (ohp >= ost.maxHealth) continue;
+      const ov = this.allyViews.get(other.id);
+      if (!ov || !ov.sprite.active) continue;
+      if (Math.hypot(ov.sprite.x - sx, ov.sprite.y - sy) > radius) continue;
+      const frac = ohp / ost.maxHealth;
+      if (!best || frac < best.frac) {
+        best = {
+          frac, x: ov.sprite.x, y: ov.sprite.y,
+          missing: ost.maxHealth - ohp,
+          apply: (n) => { other.hp = Math.min(ost.maxHealth, ohp + n); }
+        };
+      }
+    }
+    if (!best) return;
+    best.apply(Math.min(st.attack, best.missing));
+    this.hitSparks.explode(4, best.x, best.y);
+  }
+
   updateAllies(dt) {
     for (const cell of [...this.run.cells]) {
       const v = this.allyViews.get(cell.id);
@@ -3231,10 +3520,18 @@ export class GameScene extends Phaser.Scene {
       const st = this.run.computeCell(cell);
       const sp = v.sprite;
       cell.resting = false; // намеренная остановка — только в ветках ниже
+      // Медик не атакует: держится орбиты героя и лечит вместо укусов.
+      const isMedic = cell.type === 'medic';
       // Sticky target: keep until dead or far away, then nearest in aggro.
       let tgt = cell.target && cell.target.active ? cell.target : null;
-      if (tgt && Math.hypot(tgt.x - sp.x, tgt.y - sp.y) > ALLIES.dropAggroRadius) tgt = null;
-      if (!tgt) {
+      if (this.gatherMode || isMedic) {
+        tgt = null; // сбор и медик: врагов игнорируем, цель — только герой
+        cell.target = null;
+        cell.cd = isMedic ? cell.cd : 0;
+      } else if (tgt && Math.hypot(tgt.x - sp.x, tgt.y - sp.y) > ALLIES.dropAggroRadius) {
+        tgt = null;
+      }
+      if (!tgt && !this.gatherMode && !isMedic) {
         tgt = this.nearestEnemyFor(sp.x, sp.y, ALLIES.aggroRadius);
         cell.target = tgt;
         cell.cd = 0;
@@ -3264,15 +3561,17 @@ export class GameScene extends Phaser.Scene {
           }
         }
       } else {
-        // No foes: route back to the hero's orbit so the colony stays together
-        // (paths lead through doors/tunnels instead of pushing into walls).
+        // No foes (or gather mode): route back to the hero's orbit so the
+        // colony stays together (paths lead through doors/tunnels instead of
+        // pushing into walls). В сборе орбита плотнее — клетки сходятся к герою.
         // Якорь орбиты — всегда проходимая точка: сырой слот может лежать
         // внутри нароста/стенда, и тогда клетка вечно давила бы в стену.
         const ang = cell.id * 2.4;
+        const orbR = this.gatherMode ? 34 : 95;
         let orb = cell.orbit;
-        if (!orb || Math.hypot(this.player.x - orb.hx, this.player.y - orb.hy) > 50) {
-          const rawX = this.player.x + Math.cos(ang) * 95;
-          const rawY = this.player.y + Math.sin(ang) * 95;
+        if (!orb || Math.hypot(this.player.x - orb.hx, this.player.y - orb.hy) > (this.gatherMode ? 20 : 50)) {
+          const rawX = this.player.x + Math.cos(ang) * orbR;
+          const rawY = this.player.y + Math.sin(ang) * orbR;
           const spot = this.worldApi.nearestWalkable(rawX, rawY, st.bodyR) ||
             { x: this.player.x, y: this.player.y };
           orb = cell.orbit = { x: spot.x, y: spot.y, hx: this.player.x, hy: this.player.y };
@@ -3298,6 +3597,13 @@ export class GameScene extends Phaser.Scene {
             const s = d > ALLIES.leashRadius ? 1 : 0.5;
             sp.setVelocity((dx / d) * st.moveSpeed * s, (dy / d) * st.moveSpeed * s);
           }
+        }
+      }
+      if (isMedic) {
+        cell.cd += dt;
+        if (cell.cd >= st.intervalMs) {
+          cell.cd = 0;
+          this.medicHeal(cell, st);
         }
       }
       this.pushOutOfSolids(sp, st.bodyR * 0.8);
@@ -3363,11 +3669,12 @@ export class GameScene extends Phaser.Scene {
       const frac = Math.max(0, Math.min(1, cell.hp / st.maxHealth));
       const x = v.sprite.x;
       const y = v.sprite.y;
-      v.barBg.setPosition(x, y - 22);
-      v.bar.setPosition(x - (30 * (1 - frac)) / 2, y - 22);
+      const lift = 22 + 5 * (cell.merge - 1);
+      v.barBg.setPosition(x, y - lift);
+      v.bar.setPosition(x - (30 * (1 - frac)) / 2, y - lift);
       v.bar.width = Math.max(1, 30 * frac);
       v.bar.setFillStyle(frac <= 0.3 ? 0xff4d5e : 0x3ddc84, 1);
-      v.badge.setPosition(x + 16, y - 20);
+      v.badge.setPosition(x + 16, y - lift + 2);
     }
   }
 
@@ -3405,6 +3712,8 @@ export class GameScene extends Phaser.Scene {
     if (this.isGameOver) return;
     this.isGameOver = true;
     this.hp = 0;
+    this.gatherMode = false;
+    ui.setGather({ hasCells: false, active: false });
     ui.hideBoss();
     ui.hideAction();
     panels.hideAll();

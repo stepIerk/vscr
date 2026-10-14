@@ -26,11 +26,9 @@ export function initTouch({ onMove }) {
   const zone = document.getElementById('joy-zone');
   const joy = document.getElementById('joy');
   const knob = document.getElementById('joy-knob');
-  const hint = document.getElementById('bar-hint');
   if (!wrap || !zone || !joy || !knob) return false;
   wrap.classList.remove('hidden');
   document.body.classList.add('touch');
-  if (hint) hint.textContent = 'Палец в любом месте — джойстик';
 
   if (bound) return true; // listeners live once, even across scene restarts
   bound = true;

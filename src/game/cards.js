@@ -10,6 +10,9 @@ import { ALLY_TYPES, MUTATIONS, UPGRADES } from '../config.js';
 
 function cellCard(type) {
   const t = ALLY_TYPES[type];
+  const power = type === 'medic'
+    ? { icon: 'regen', value: `+${t.attack}` } // медик: сила лечения, не урон
+    : { icon: 'atk', value: String(t.attack) };
   return {
     id: `cell-${type}`,
     kind: 'cell',
@@ -17,9 +20,16 @@ function cellCard(type) {
     title: `Клетка: ${t.name}`,
     tag: 'Новая клетка',
     desc: t.role,
-    lines: [
-      `АТК ${t.attack} · ${Math.round(1000 / t.attackIntervalMs * 10) / 10}/с`,
-      `ЗДР ${t.maxHealth} · СКР ${t.moveSpeed}`
+    // Характеристики: иконка + значение (иконки — Tabler, см. ui/icons.js).
+    stats: [
+      [
+        power,
+        { icon: 'atkSpeed', value: `${Math.round(1000 / t.attackIntervalMs * 10) / 10}/с` }
+      ],
+      [
+        { icon: 'hp', value: String(t.maxHealth) },
+        { icon: 'spd', value: String(t.moveSpeed) }
+      ]
     ]
   };
 }
@@ -56,6 +66,7 @@ export const CARDS = [
   cellCard('hunter'),
   cellCard('defender'),
   cellCard('parasite'),
+  cellCard('medic'),
   ...Object.keys(MUTATIONS).map(mutationCard),
   ...Object.keys(UPGRADES).map(upgradeCard)
 ];

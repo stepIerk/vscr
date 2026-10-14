@@ -33,6 +33,7 @@ export class RunState {
     this.activeArtifacts = []; // up to ARTIFACTS.slots ids
     this.cells = []; // live instances: {id,type,merge,...}
     this.nextCellId = 1;
+    this.biomass = 0; // биоматериал: валюта колонии (слияния, расщепление)
     this.heroMutations = {}; // key -> level
     this.upgrades = {}; // key -> level
     this.maxCells = ALLIES.max;
@@ -99,16 +100,58 @@ export class RunState {
     return { ok: true, reason: '' };
   }
 
-  /** Merge b into a: a grows a merge level, b is consumed, one slot frees up. */
+  /** Merge b into a: a grows a merge level, b is consumed, one slot frees up.
+   *  Подъём уровня стоит биоматериала (см. mergeCost). */
   mergeCells(aId, bId) {
     const a = this.getCell(aId);
     const b = this.getCell(bId);
     const chk = this.mergeCheck(a, b);
     if (!chk.ok) return null;
+    if (!this.spendBiomass(this.mergeCost(a.merge))) return null;
     this.removeCell(bId);
     a.merge += 1;
     a.hp = this.computeCell(a).maxHealth; // reinforced body, full health
     return a;
+  }
+
+  // --------------------------------------------------- биоматериал (колония)
+
+  /** Сколько биоматериала стоит поднять клетку с уровня `from` на уровень выше. */
+  mergeCost(from) {
+    return ALLIES.mergeCostBase * from;
+  }
+
+  /** Всего биоматериала, вложенного в слияния для клетки уровня `merge`. */
+  mergeInvested(merge) {
+    let sum = 0;
+    for (let k = 1; k < merge; k++) sum += this.mergeCost(k);
+    return sum;
+  }
+
+  /** Сколько биоматериала вернёт расщепление клетки уровня `merge`. */
+  splitRefund(merge) {
+    return ALLIES.splitBase + Math.floor(this.mergeInvested(merge) * ALLIES.splitRate);
+  }
+
+  addBiomass(n) {
+    this.biomass += n;
+    return this.biomass;
+  }
+
+  spendBiomass(n) {
+    if (this.biomass < n) return false;
+    this.biomass -= n;
+    return true;
+  }
+
+  /** Расщепить клетку на биоматериал. Возвращает полученную сумму или null. */
+  splitCell(id) {
+    const cell = this.getCell(id);
+    if (!cell) return null;
+    const refund = this.splitRefund(cell.merge);
+    this.biomass += refund;
+    this.removeCell(id);
+    return refund;
   }
 
   // --------------------------------------------------- mutations/upgrades

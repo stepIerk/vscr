@@ -6,6 +6,7 @@
  */
 
 import { ALLY_TYPES } from '../config.js';
+import { icon, cardIcon } from './icons.js';
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -24,6 +25,27 @@ function imgEl(url, cls) {
     return im;
   }
   return el('div', `${cls} img-missing`);
+}
+
+/** Иконка из Tabler SVG (наследует цвет через currentColor). */
+function iconEl(name, cls) {
+  const span = el('span', 'ico-wrap');
+  span.innerHTML = icon(name, cls || 'ico');
+  return span.firstChild;
+}
+
+/** Характеристика: иконка + значение. */
+function statEl(iconName, value) {
+  const s = el('span', 'stat');
+  s.appendChild(iconEl(iconName, 'ico ico-stat'));
+  s.appendChild(el('span', '', value));
+  return s;
+}
+
+function statsRow(pairs) {
+  const row = el('div', 'stat-row');
+  for (const { icon: ic, value } of pairs) row.appendChild(statEl(ic, value));
+  return row;
 }
 
 function overlay(id, sheet = false) {
@@ -50,11 +72,23 @@ export function showDraft({ level, cards, onPick }) {
   for (const card of cards) {
     const b = el('button', `draft-card kind-${card.kind}`);
     b.type = 'button';
-    b.appendChild(el('span', 'card-tag', card.tag));
+    // Картинка сверху: клетка — спрайт из игры, мутация/улучшение — своя иконка.
+    const imgBox = el('div', 'card-img');
+    if (card.img) imgBox.appendChild(imgEl(card.img, 'card-art'));
+    else {
+      imgBox.classList.add('card-img-ico');
+      imgBox.appendChild(iconEl(cardIcon(card), 'ico ico-card'));
+    }
+    b.appendChild(imgBox);
+    const tag = el('span', 'card-tag');
+    tag.appendChild(iconEl(cardIcon(card), 'ico ico-tag'));
+    tag.appendChild(el('span', '', card.tag));
+    b.appendChild(tag);
     b.appendChild(el('div', 'card-title', card.title));
     b.appendChild(el('div', 'card-desc', card.desc));
+    for (const row of card.stats || []) b.appendChild(statsRow(row));
     for (const line of card.lines || []) b.appendChild(el('div', 'card-line', line));
-    if (card.levelLine) b.appendChild(el('div', 'card-level', card.levelLine));
+    // if (card.levelLine) b.appendChild(el('div', 'card-level', card.levelLine));
     b.addEventListener('click', () => onPick(card));
     row.appendChild(b);
   }
@@ -118,17 +152,21 @@ export function isColonyOpen() {
   return !!o && !o.classList.contains('hidden');
 }
 
-export function showColony(snap, { onMerge, onClose }) {
+export function showColony(snap, { onMerge, onSplit, onClose }) {
   const o = overlay('colony-overlay');
   o.classList.remove('hidden');
-  o.replaceChildren();
   mergeSel = mergeSel.filter((id) => snap.run.getCell(id)); // drop dead cells
+  // Скролл переживает перерисовку (слияние/расщепление): панель не прыгает.
+  const panelPrev = o.querySelector('.panel');
+  const savedScroll = panelPrev ? panelPrev.scrollTop : 0;
+  o.replaceChildren();
   const box = el('div', 'panel colony-panel');
   const head = el('div', 'colony-head');
   const titleWrap = el('div');
   titleWrap.appendChild(el('h2', 'panel-title', 'Колония'));
   titleWrap.appendChild(
-    el('div', 'panel-sub', 'Нажми две совместимые клетки — они сольются в более сильную')
+    el('div', 'panel-sub',
+      'Выбери одну клетку — расщепить, две совместимые — слить. Кнопка действия закреплена внизу.')
   );
   head.appendChild(titleWrap);
   const close = el('button', 'ghost-btn', 'Закрыть');
@@ -139,80 +177,17 @@ export function showColony(snap, { onMerge, onClose }) {
   });
   head.appendChild(close);
   box.appendChild(head);
+  const bioLine = el('div', 'colony-bio');
+  bioLine.appendChild(el('span', '', 'Биоматериал: '));
+  bioLine.appendChild(statEl('bio', snap.run.biomass));
+  box.appendChild(bioLine);
 
   // --- cells ---
   box.appendChild(el('h3', 'section-title', `Клетки (${snap.run.cells.length}/${snap.run.maxCells})`));
   const grid = el('div', 'colony-grid');
-  if (!snap.cells.length) grid.appendChild(el('div', 'empty-note', 'Пока пусто — новые клетки дают уровни героя.'));
-  const selCell = mergeSel.length === 1 ? snap.run.getCell(mergeSel[0]) : null;
-  for (const { cell, stats, img } of snap.cells) {
-    const selected = mergeSel.includes(cell.id);
-    let cls = 'colony-card' + (selected ? ' selected' : '');
-    let compat = null;
-    if (selCell && !selected) {
-      compat = snap.run.mergeCheck(selCell, cell);
-      cls += compat.ok ? ' merge-ok' : ' merge-no';
-    }
-    const b = el('button', cls);
-    b.type = 'button';
-    b.appendChild(imgEl(img, 'cell-img'));
-    const info = el('div', 'cell-info');
-    info.appendChild(el('div', 'card-title',
-      `${cellName(cell)}${cell.merge > 1 ? ` · слияние ${cell.merge}` : ''}`));
-    // Полоска здоровья клетки.
-    const hpTrack = el('div', 'side-hp-track');
-    const hpFill = el('div', 'side-hp-fill');
-    hpFill.style.width = `${Math.round((100 * Math.max(0, cell.hp)) / Math.max(1, stats.maxHealth))}%`;
-    hpTrack.appendChild(hpFill);
-    info.appendChild(hpTrack);
-    info.appendChild(el('div', 'card-line', `ЗДР ${Math.ceil(cell.hp)}/${stats.maxHealth}`));
-    info.appendChild(
-      el('div', 'card-line', `АТК ${round1(stats.attack)} · ${round1(stats.attackSpeed)}/с · СКР ${Math.round(stats.moveSpeed)}`)
-    );
-    const muts = Object.entries(cell.mutations);
-    info.appendChild(el('div', 'card-line dim', muts.length ? `Мутации: ${muts.map(([k, v]) => `${k} ${v}`).join(', ')}` : 'Без мутаций'));
-    if (compat) {
-      info.appendChild(el('div', compat.ok ? 'merge-hint-ok' : 'merge-hint-no',
-        compat.ok ? '✓ сольётся с выбранной' : `✕ ${compat.reason}`));
-    } else if (!selected && mergeSel.length === 0) {
-      info.appendChild(el('div', hasPartner(snap, cell) ? 'merge-hint-ok' : 'merge-hint-dim',
-        hasPartner(snap, cell) ? '✓ есть пара для слияния' : 'пары пока нет'));
-    }
-    b.appendChild(info);
-    b.addEventListener('click', () => {
-      if (mergeSel.includes(cell.id)) mergeSel = mergeSel.filter((x) => x !== cell.id);
-      else if (mergeSel.length < 2) mergeSel.push(cell.id);
-      else mergeSel = [mergeSel[1], cell.id];
-      showColony(snap, { onMerge, onClose }); // re-render selection
-    });
-    grid.appendChild(b);
-  }
   box.appendChild(grid);
-
-  // --- merge bar ---
+  // --- merge bar (липкая: кнопка всегда под пальцем) ---
   const bar = el('div', 'merge-bar');
-  if (mergeSel.length === 2) {
-    const [a, b] = mergeSel.map((id) => snap.run.getCell(id));
-    const chk = snap.run.mergeCheck(a, b);
-    if (chk.ok) {
-      const after = previewMerge(snap, a);
-      bar.appendChild(
-        el('div', 'merge-preview',
-          `Слияние → ${cellName(a)} ${a.merge + 1} · ЗДР ${after.maxHealth} · АТК ${round1(after.attack)} · клеток ${snap.run.cells.length} → ${snap.run.cells.length - 1}`)
-      );
-      const go = el('button', 'primary-btn', 'Слить клетки');
-      go.type = 'button';
-      go.addEventListener('click', () => {
-        mergeSel = [];
-        onMerge(a.id, b.id);
-      });
-      bar.appendChild(go);
-    } else {
-      bar.appendChild(el('div', 'merge-reason', `Нельзя слить: ${chk.reason}`));
-    }
-  } else {
-    bar.appendChild(el('div', 'merge-reason', 'Выбери две клетки: сольются только одинаковые по виду, уровню и мутациям.'));
-  }
   box.appendChild(bar);
 
   // --- mutations ---
@@ -236,15 +211,154 @@ export function showColony(snap, { onMerge, onClose }) {
 
   // --- hero line ---
   const h = snap.hero;
-  box.appendChild(
-    el('div', 'hero-line',
-      `Герой ${snap.run.level} · ЗДР ${Math.ceil(snap.heroHp)}/${h.maxHealth} · АТК ${round1(h.attack)} · ${round1(h.attackSpeed)}/с · СКР ${Math.round(h.moveSpeed)}${h.regen > 0 ? ` · +${round1(h.regen)}/с` : ''}`)
-  );
+  const hl = el('div', 'hero-line');
+  hl.appendChild(el('span', '', `Герой ${snap.run.level} · `));
+  hl.appendChild(statEl('hp', `${Math.ceil(snap.heroHp)}/${h.maxHealth}`));
+  hl.appendChild(statEl('atk', round1(h.attack)));
+  hl.appendChild(statEl('atkSpeed', `${round1(h.attackSpeed)}/с`));
+  hl.appendChild(statEl('spd', Math.round(h.moveSpeed)));
+  if (h.regen > 0) hl.appendChild(statEl('regen', `+${round1(h.regen)}/с`));
+  box.appendChild(hl);
   o.appendChild(box);
+  box.scrollTop = savedScroll;
+
+  // --- сетка строится один раз; выбор красится на месте, без перестройки ---
+  const cardRefs = new Map(); // id -> { btn, hintBox, badge, cell }
+  buildGrid();
+  paintSelection();
+
+  function buildGrid() {
+    grid.replaceChildren();
+    cardRefs.clear();
+    if (!snap.cells.length) {
+      grid.appendChild(el('div', 'empty-note', 'Пока пусто — новые клетки дают уровни героя.'));
+      return;
+    }
+    for (const { cell, stats, img } of snap.cells) {
+      const b = el('button', 'colony-card');
+      b.type = 'button';
+      b.setAttribute('aria-label', `${cellName(cell)} — выбрать`);
+      b.appendChild(imgEl(img, 'cell-img'));
+      const badge = el('span', 'pick-badge hidden', '');
+      b.appendChild(badge);
+      const info = el('div', 'cell-info');
+      info.appendChild(el('div', 'card-title',
+        `${cellName(cell)}${cell.merge > 1 ? ` · слияние ${cell.merge}` : ''}`));
+      // Полоска здоровья клетки.
+      const hpTrack = el('div', 'side-hp-track');
+      const hpFill = el('div', 'side-hp-fill');
+      hpFill.style.width = `${Math.round((100 * Math.max(0, cell.hp)) / Math.max(1, stats.maxHealth))}%`;
+      hpTrack.appendChild(hpFill);
+      info.appendChild(hpTrack);
+      info.appendChild(statsRow([
+        { icon: 'hp', value: `${Math.ceil(cell.hp)}/${stats.maxHealth}` },
+        { icon: 'atk', value: round1(stats.attack) },
+        { icon: 'atkSpeed', value: `${round1(stats.attackSpeed)}/с` },
+        { icon: 'spd', value: Math.round(stats.moveSpeed) }
+      ]));
+      const muts = Object.entries(cell.mutations);
+      info.appendChild(el('div', 'card-line dim', muts.length ? `Мутации: ${muts.map(([k, v]) => `${k} ${v}`).join(', ')}` : 'Без мутаций'));
+      const hintBox = el('div', 'merge-hint-box');
+      info.appendChild(hintBox);
+      b.appendChild(info);
+      b.addEventListener('click', () => {
+        if (mergeSel.includes(cell.id)) mergeSel = mergeSel.filter((x) => x !== cell.id);
+        else if (mergeSel.length < 2) mergeSel.push(cell.id);
+        else mergeSel = [mergeSel[1], cell.id];
+        paintSelection(); // только подсветка — скролл и сетка на месте
+      });
+      grid.appendChild(b);
+      cardRefs.set(cell.id, { btn: b, hintBox, badge, cell });
+    }
+  }
+
+  function hint(kind, text) {
+    return el('div', kind, text);
+  }
+
+  function paintSelection() {
+    const selCell = mergeSel.length === 1 ? snap.run.getCell(mergeSel[0]) : null;
+    for (const [id, ref] of cardRefs) {
+      const selected = mergeSel.includes(id);
+      ref.btn.classList.toggle('selected', selected);
+      ref.btn.classList.remove('merge-ok', 'merge-no');
+      ref.hintBox.replaceChildren();
+      if (selCell && id !== selCell.id) {
+        const compat = snap.run.mergeCheck(selCell, ref.cell);
+        ref.btn.classList.toggle('merge-ok', compat.ok);
+        ref.btn.classList.toggle('merge-no', !compat.ok);
+        ref.hintBox.appendChild(compat.ok
+          ? hint('merge-hint-ok', '✓ сольётся с выбранной')
+          : hint('merge-hint-no', `✕ ${compat.reason}`));
+      } else if (!selected && mergeSel.length === 0) {
+        ref.hintBox.appendChild(hasPartner(snap, ref.cell)
+          ? hint('merge-hint-ok', '✓ есть пара для слияния')
+          : hint('merge-hint-dim', 'пары пока нет'));
+      }
+      const order = mergeSel.indexOf(id);
+      ref.badge.classList.toggle('hidden', order === -1);
+      if (order !== -1) ref.badge.textContent = String(order + 1);
+    }
+    renderBar();
+  }
+
+  function renderBar() {
+    bar.replaceChildren();
+    if (mergeSel.length === 2) {
+      const [a, b] = mergeSel.map((id) => snap.run.getCell(id));
+      const chk = snap.run.mergeCheck(a, b);
+      const cost = snap.run.mergeCost(a.merge);
+      const poor = snap.run.biomass < cost;
+      if (chk.ok) {
+        const after = previewMerge(snap, a);
+        const prev = el('div', 'merge-preview');
+        prev.appendChild(el('span', '', `Слияние → ${cellName(a)} ${a.merge + 1} · `));
+        prev.appendChild(statEl('hp', after.maxHealth));
+        prev.appendChild(statEl('atk', round1(after.attack)));
+        prev.appendChild(el('span', '', ` · клеток ${snap.run.cells.length} → ${snap.run.cells.length - 1}`));
+        bar.appendChild(prev);
+        const costLine = el('div', poor ? 'cost-line bad' : 'cost-line');
+        costLine.appendChild(el('span', '', 'Стоимость: '));
+        costLine.appendChild(statEl('bio', `${cost} биоматериала`));
+        costLine.appendChild(el('span', '', ` · у тебя ${snap.run.biomass}${poor ? ' — не хватает' : ''}`));
+        bar.appendChild(costLine);
+        const go = el('button', 'primary-btn', 'Слить клетки');
+        go.type = 'button';
+        go.disabled = poor;
+        go.addEventListener('click', () => {
+          mergeSel = [];
+          onMerge(a.id, b.id);
+        });
+        bar.appendChild(go);
+      } else {
+        bar.appendChild(el('div', 'merge-reason', `Нельзя слить: ${chk.reason}`));
+      }
+    } else if (mergeSel.length === 1) {
+      const cell = snap.run.getCell(mergeSel[0]);
+      if (cell) {
+        const refund = snap.run.splitRefund(cell.merge);
+        bar.appendChild(el('div', 'merge-preview', `${cellName(cell)} · расщепление на биоматериал`));
+        const refundLine = el('div', 'cost-line');
+        refundLine.appendChild(el('span', '', 'Возврат: +'));
+        refundLine.appendChild(statEl('bio', `${refund} биоматериала`));
+        refundLine.appendChild(el('span', '', ` · у тебя ${snap.run.biomass}`));
+        bar.appendChild(refundLine);
+        const split = el('button', 'primary-btn split-btn', 'Расщепить');
+        split.type = 'button';
+        split.addEventListener('click', () => {
+          mergeSel = [];
+          onSplit(cell.id);
+        });
+        bar.appendChild(split);
+      }
+    } else {
+      bar.appendChild(el('div', 'merge-reason', 'Выбери клетку, чтобы расщепить её, или две совместимые — чтобы слить.'));
+    }
+  }
 }
 
 function cellName(cell) {
-  const names = { hunter: 'Охотник', defender: 'Защитник', parasite: 'Паразит' };
+  const names = { hunter: 'Охотник', defender: 'Защитник', parasite: 'Паразит', medic: 'Медик' };
   try {
     const cfg = ALLY_TYPES[cell.type];
     if (cfg && cfg.name) return `${cfg.name} #${cell.id}`;
@@ -374,7 +488,9 @@ export function showArtifacts(view, { onToggle, onClose }) {
       b.appendChild(imgEl(view.icon, 'slot-icon'));
       const info = el('div', 'slot-info');
       info.appendChild(el('div', 'card-title', it.name));
-      info.appendChild(el('div', 'card-line', `ур. ${it.level}/${it.maxLevel}`));
+      const lvl = el('div', 'card-line');
+      lvl.appendChild(statEl('lvl', `${it.level}/${it.maxLevel}`));
+      info.appendChild(lvl);
       info.appendChild(el('div', 'card-line dim', 'нажми — снять'));
       b.appendChild(info);
       b.addEventListener('click', () => onToggle(it.id, false));
@@ -396,7 +512,9 @@ export function showArtifacts(view, { onToggle, onClose }) {
       b.appendChild(imgEl(view.icon, 'slot-icon'));
       const info = el('div', 'slot-info');
       info.appendChild(el('div', 'card-title', it.name));
-      info.appendChild(el('div', 'card-line', `ур. ${it.level}/${it.maxLevel}`));
+      const lvl = el('div', 'card-line');
+      lvl.appendChild(statEl('lvl', `${it.level}/${it.maxLevel}`));
+      info.appendChild(lvl);
       b.appendChild(info);
       b.addEventListener('click', () => onToggle(it.id, true));
       rg.appendChild(b);

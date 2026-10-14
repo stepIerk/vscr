@@ -1,11 +1,14 @@
 /**
  * DOM interface layer: terminal-style HUD, bottom command panel (colony hex
- * strip + menu buttons), contextual action key and Game Over overlay.
+ * strip), floating gather/inventory buttons above the bar, contextual action
+ * key and Game Over overlay.
  * Kept outside Phaser so gameplay scenes stay testable and future mobile
  * controls / menus can reuse this module.
  *
  * All DOM listeners are bound exactly once via `bind*()`.
  */
+
+import { icon } from './ui/icons.js';
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
@@ -20,10 +23,8 @@ export class UI {
     this.levelText = document.getElementById('level-text');
     this.xpFill = document.getElementById('xp-fill');
     this.xpText = document.getElementById('xp-text');
-    this.colonyBtn = document.getElementById('colony-btn');
+    this.gatherBtn = document.getElementById('gather-btn');
     this.artifactsBtn = document.getElementById('artifacts-btn');
-    this.colonyCount = document.getElementById('colony-count');
-    this.colonyNote = document.getElementById('colony-note');
     this.colonyStrip = document.getElementById('colony-strip');
     this.invCount = document.getElementById('inv-count');
     this.actionBtn = document.getElementById('action-btn');
@@ -42,8 +43,9 @@ export class UI {
     this.restartBtn = document.getElementById('restart-btn');
     this._onRestart = null;
     this._bound = false;
-    this._onColony = null;
-    this._colonyBound = false;
+    this._onGather = null;
+    this._gatherBound = false;
+    this._gatherActive = false;
     this._onArtifacts = null;
     this._artifactsBound = false;
     this._onAction = null;
@@ -79,16 +81,41 @@ export class UI {
     });
   }
 
-  /** Bind colony button once. Safe to call multiple times. */
-  bindColony(onColony) {
-    this._onColony = onColony;
-    if (this._colonyBound) return;
-    this._colonyBound = true;
-    if (this.colonyBtn) {
-      this.colonyBtn.addEventListener('click', () => {
-        if (this._onColony) this._onColony();
+  /** Bind the gather/scatter button once. Safe to call multiple times. */
+  bindGather(onGather) {
+    this._onGather = onGather;
+    if (this._gatherBound) return;
+    this._gatherBound = true;
+    if (this.gatherBtn) {
+      this.gatherBtn.addEventListener('click', () => {
+        if (this._onGather) this._onGather();
       });
     }
+    this._renderGatherBtn();
+  }
+
+  /**
+   * Кнопка сбора: видна, только пока есть клетки.
+   * `hasCells` — есть ли бактерии, `active` — идёт ли сбор (иконка роспуска).
+   */
+  setGather({ hasCells, active }) {
+    const changed =
+      this._gatherHasCells !== !!hasCells || this._gatherActive !== !!active;
+    this._gatherHasCells = !!hasCells;
+    this._gatherActive = !!active;
+    if (changed) this._renderGatherBtn();
+  }
+
+  _renderGatherBtn() {
+    const b = this.gatherBtn;
+    if (!b) return;
+    const active = this._gatherActive;
+    const hasCells = this._gatherHasCells;
+    b.classList.toggle('hidden', !hasCells);
+    b.classList.toggle('gathering', active);
+    b.setAttribute('aria-label', active ? 'Распустить колонию' : 'Сбор колонии');
+    b.title = active ? 'Распустить колонию' : 'Сбор колонии';
+    b.innerHTML = icon(active ? 'scatter' : 'gather', 'ico');
   }
 
   /** Bind the artifact inventory button once. Safe to call multiple times. */
@@ -100,6 +127,9 @@ export class UI {
       this.artifactsBtn.addEventListener('click', () => {
         if (this._onArtifacts) this._onArtifacts();
       });
+      this.artifactsBtn.innerHTML =
+        icon('inventory', 'ico') + '<span class="inv-count" id="inv-count">0/5</span>';
+      this.invCount = document.getElementById('inv-count');
     }
   }
 
@@ -145,11 +175,10 @@ export class UI {
     this.hideAction();
     this.update(100, 100, 0, 0, 0);
     this.setLevel(1, 0, 6);
-    this.setColonyCount(0, 5);
     this.setArtifacts(0, 5);
+    this.setGather({ hasCells: false, active: false });
     this._stripSig = null;
     if (this.colonyStrip) this.colonyStrip.replaceChildren();
-    if (this.colonyNote) this.colonyNote.classList.add('hidden');
   }
 
   setSeed(seed) {
@@ -174,8 +203,8 @@ export class UI {
     if (this.xpText) this.xpText.textContent = `${xp}/${required}`;
   }
 
-  setColonyCount(n, max) {
-    if (this.colonyCount) this.colonyCount.textContent = `${n}/${max}`;
+  setColonyCount() {
+    /* Гекс-слоты в баре больше не показывают счётчик — метод оставлен для совместимости. */
   }
 
   setArtifacts(n, max) {
@@ -199,23 +228,15 @@ export class UI {
     if (sig === this._stripSig) return;
     this._stripSig = sig;
 
-    if (this.colonyNote) {
-      if (view.stashed > 0) {
-        this.colonyNote.textContent = `свёрнуто ${view.stashed}`;
-        this.colonyNote.classList.remove('hidden');
-      } else {
-        this.colonyNote.classList.add('hidden');
-      }
-    }
-
     box.replaceChildren();
     const byIndex = cells.slice(0, max);
     for (let i = 0; i < max; i++) {
       const c = byIndex[i];
       if (!c) {
-        const empty = document.createElement('span');
+        const empty = document.createElement('button');
+        empty.type = 'button';
         empty.className = 'hex empty';
-        empty.setAttribute('aria-hidden', 'true');
+        empty.setAttribute('aria-label', 'Пустой слот — открыть колонию');
         const frame = document.createElement('span');
         frame.className = 'hex-frame';
         const inner = document.createElement('span');
@@ -226,6 +247,7 @@ export class UI {
         inner.appendChild(plus);
         frame.appendChild(inner);
         empty.appendChild(frame);
+        empty.addEventListener('click', onOpen);
         box.appendChild(empty);
         continue;
       }

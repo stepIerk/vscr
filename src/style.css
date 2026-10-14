@@ -397,7 +397,8 @@ body {
 .colony-strip {
   display: flex;
   gap: 8px;
-  padding: 2px 10px 8px;
+  justify-content: center;
+  padding: 4px 10px 8px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -405,6 +406,10 @@ body {
 
 .colony-strip::-webkit-scrollbar {
   display: none;
+}
+
+.panel.colony-panel {
+  overflow-x: hidden;
 }
 
 /* --- гекс-слот клетки: картинка, бейдж уровня, полоска здоровья --- */
@@ -499,111 +504,80 @@ body {
   color: rgba(111, 136, 173, 0.75);
 }
 
-.bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px 9px;
-}
+/* ------------------------------------------------- плавающие кнопки над баром */
 
-/* Легенда управления живёт в центре панели — на телефоне её место занимает
-   джойстик, поэтому там она скрыта. */
-.bar-hint {
-  flex: 1;
-  min-width: 0;
-  font-size: 10px;
-  line-height: 1.5;
-  text-align: center;
-  color: var(--dim);
-}
-
-.bar-btn {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 46px;
-  padding: 6px 12px;
-  font: inherit;
-  color: var(--text);
-  background: linear-gradient(180deg, rgba(16, 34, 66, 0.9), rgba(7, 15, 30, 0.9));
-  border: 1px solid var(--line-2);
-  border-radius: 5px;
-  cursor: pointer;
-  transition: transform 0.08s ease, box-shadow 0.15s ease, background 0.15s ease;
-}
-
-.bar-btn:active {
-  transform: translateY(1px);
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5);
-}
-
-.bar-main {
-  flex: 0 1 340px;
-  box-shadow: 0 0 16px rgba(77, 163, 255, 0.16), inset 0 1px 0 rgba(160, 210, 255, 0.14);
-}
-
-.bar-main:hover {
-  background: linear-gradient(180deg, rgba(24, 52, 100, 0.95), rgba(9, 20, 40, 0.95));
-}
-
-.bar-ico {
-  font-size: 20px;
-  line-height: 1;
-  color: var(--accent);
-  text-shadow: 0 0 10px rgba(77, 163, 255, 0.7);
-}
-
-.bar-txt {
+/* Правила `.bar-*` ниже — legacy (кнопки в баре удалены, оставлены для совместимости). */
+.fab-btn {
+  position: absolute;
+  bottom: calc(var(--bar-h)  + env(safe-area-inset-bottom, 0px));
+  z-index: 12;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  min-width: 0;
-}
-
-.bar-txt b {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-}
-
-.bar-txt i {
-  font-style: normal;
-  font-size: 10px;
-  color: var(--dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.bar-inv {
-  position: relative;
-  flex-direction: column;
-  gap: 1px;
+  align-items: center;
   justify-content: center;
-  width: 60px;
-  padding: 4px;
+  gap: 2px;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  background: linear-gradient(180deg, rgba(16, 34, 66, 0.92), rgba(7, 15, 30, 0.95));
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 14px rgba(77, 163, 255, 0.12);
+  transition: transform 0.08s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
-.bar-inv .bar-ico {
-  font-size: 18px;
+.fab-btn .ico {
+  width: 24px;
+  height: 24px;
 }
 
-.inv-count {
-  font-size: 10px;
-  font-weight: 700;
+.fab-btn:hover,
+.fab-btn:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 18px rgba(77, 163, 255, 0.28);
+}
+
+.fab-btn:active {
+  transform: translateY(1px);
+}
+
+.fab-gather {
+  left: max(12px, env(safe-area-inset-left, 0px));
+}
+
+.fab-gather.gathering {
+  color: var(--amber);
+  border-color: rgba(255, 200, 87, 0.65);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 16px rgba(255, 200, 87, 0.28);
+}
+
+.fab-inv {
+  right: max(12px, env(safe-area-inset-right, 0px));
   color: var(--violet);
 }
 
-.bar-cap {
-  font-size: 8px;
-  letter-spacing: 0.16em;
-  color: var(--dim);
+.fab-inv .inv-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  color: var(--text);
+  background: rgba(7, 15, 30, 0.95);
+  border: 1px solid rgba(169, 139, 255, 0.6);
+  border-radius: 9px;
 }
 
-.bar-inv.has-items {
+.fab-inv.has-items {
   border-color: rgba(169, 139, 255, 0.6);
-  box-shadow: 0 0 14px rgba(169, 139, 255, 0.2);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 14px rgba(169, 139, 255, 0.22);
 }
 
 /* ------------------------------------------- контекстная кнопка действия */
@@ -1024,20 +998,21 @@ body:has(#toast:not(.hidden)) .joy-hint {
 /* ------------------------------------------------------- карточки драфта */
 
 .draft-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   justify-content: center;
 }
 
 .draft-card {
-  flex: 1 1 0;
-  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  align-items: flex-start;
+  align-items: stretch;
   text-align: left;
-  padding: 13px;
+  height: 292px;
+  padding: 12px;
+  overflow: hidden;
   font: inherit;
   color: var(--text);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
@@ -1054,7 +1029,6 @@ body:has(#toast:not(.hidden)) .joy-hint {
   background: rgba(77, 163, 255, 0.08);
   box-shadow: 0 0 20px rgba(77, 163, 255, 0.2);
   outline: none;
-  transform: translateY(-2px);
 }
 
 .draft-card:active {
@@ -1073,11 +1047,87 @@ body:has(#toast:not(.hidden)) .joy-hint {
   border-color: rgba(69, 224, 160, 0.5);
 }
 
+/* Картинка карточки: спрайт клетки или большая иконка мутации/улучшения. */
+.card-img {
+  width: 100%;
+  height: 76px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle, rgba(77, 163, 255, 0.1), transparent 75%);
+  border: 1px solid rgba(77, 163, 255, 0.16);
+  border-radius: 4px;
+}
+
+.card-img-ico {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.05), transparent 72%);
+}
+
+.card-art {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.ico-card {
+  width: 40px;
+  height: 40px;
+  color: var(--accent);
+}
+
+.kind-mutation .ico-card {
+  color: #ff7a8c;
+}
+
+.kind-upgrade .ico-card {
+  color: #45e0a0;
+}
+
 .card-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 9px;
   letter-spacing: 0.16em;
   color: var(--dim);
   text-transform: uppercase;
+}
+
+.ico-tag {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+/* Характеристики: иконка Tabler + значение. */
+.stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+}
+
+.stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.stat .ico {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: rgba(77, 163, 255, 0.7);
+}
+
+.colony-card .stat {
+  color: rgba(213, 228, 255, 0.88);
+}
+
+.colony-card .stat .ico {
+  color: rgba(77, 163, 255, 0.55);
 }
 
 .card-title {
@@ -1090,6 +1140,11 @@ body:has(#toast:not(.hidden)) .joy-hint {
   font-size: 12px;
   line-height: 1.45;
   color: rgba(213, 228, 255, 0.82);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .card-line {
@@ -1108,6 +1163,7 @@ body:has(#toast:not(.hidden)) .joy-hint {
   color: var(--cyan);
   border-top: 1px solid rgba(77, 163, 255, 0.16);
   width: 100%;
+  display: none;
 }
 
 /* ------------------------------------------------------------ таргеты */
@@ -1195,21 +1251,31 @@ body:has(#toast:not(.hidden)) .joy-hint {
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 6px;
+  /* Липкая шапка: заголовок и «Закрыть» всегда под рукой при скролле. */
+  position: sticky;
+  top: -18px;
+  z-index: 3;
+  margin: -18px -20px 6px;
+  padding: 18px 20px 8px;
+  background: rgba(5, 10, 20, 0.96);
+  border-bottom: 1px solid rgba(77, 163, 255, 0.18);
 }
 
 .colony-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 228px);
   gap: 10px;
+  justify-content: start;
 }
 
 .colony-card {
+  position: relative;
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  flex: 1 1 210px;
-  max-width: 300px;
+  width: 228px;
+  height: 132px;
+  overflow: hidden;
   padding: 10px 12px;
   font: inherit;
   color: var(--text);
@@ -1219,6 +1285,25 @@ body:has(#toast:not(.hidden)) .joy-hint {
   border-radius: 5px;
   cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+/* Бейдж порядка выбора: 1 — первая клетка пары, 2 — вторая. */
+.pick-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #04101f;
+  background: var(--amber);
+  border-radius: 11px;
+  box-shadow: 0 0 10px rgba(255, 200, 87, 0.5);
 }
 
 .colony-card:hover {
@@ -1241,12 +1326,10 @@ body:has(#toast:not(.hidden)) .joy-hint {
 }
 
 .cell-img {
-  width: 52px;
-  height: 52px;
+  width: 60px;
+  height: 60px;
   flex-shrink: 0;
   border-radius: 3px;
-  background: rgba(77, 163, 255, 0.06);
-  border: 1px solid rgba(77, 163, 255, 0.3);
 }
 
 .cell-img.img-missing {
@@ -1272,11 +1355,19 @@ body:has(#toast:not(.hidden)) .joy-hint {
   gap: 12px;
   flex-wrap: wrap;
   margin-top: 12px;
+  margin-bottom: 4px;
   min-height: 44px;
   padding: 10px 12px;
-  background: rgba(77, 163, 255, 0.06);
-  border: 1px dashed rgba(77, 163, 255, 0.3);
-  border-radius: 4px;
+  /* Липкая панель действий: кнопка слияния/расщепления всегда под пальцем. */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: rgba(6, 12, 23, 0.97);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+
+  height: 130px;
+  box-shadow: 0 -10px 26px rgba(0, 0, 0, 0.55);
 }
 
 .merge-preview {
@@ -1304,6 +1395,35 @@ body:has(#toast:not(.hidden)) .joy-hint {
 .merge-hint-dim {
   font-size: 11px;
   color: var(--dim);
+}
+
+/* Биоматериал колонии: баланс, цена слияния, расщепление. */
+.colony-bio {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.cost-line {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.cost-line.bad {
+  color: #ff8f9d;
+}
+
+.split-btn {
+  border-color: rgba(255, 143, 157, 0.5);
+  color: #ffb0b8;
+}
+
+.split-btn:hover,
+.split-btn:focus-visible {
+  border-color: #ff8f9d;
+  color: #ffd2d8;
 }
 
 .flat-list {
@@ -1389,16 +1509,19 @@ body:has(#toast:not(.hidden)) .joy-hint {
 
 .slot-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  grid-template-columns: repeat(auto-fill, 224px);
   gap: 9px;
   margin-bottom: 6px;
+  justify-content: start;
 }
 
 .slot-cell {
   display: flex;
   gap: 10px;
   align-items: center;
-  min-height: 74px;
+  width: 224px;
+  height: 82px;
+  overflow: hidden;
   padding: 10px 12px;
   font: inherit;
   color: var(--text);
@@ -1486,8 +1609,7 @@ body.touch {
     min-width: 26px;
   }
 
-  .hud-seed,
-  .bar-hint {
+  .hud-seed {
     display: none;
   }
 
@@ -1519,8 +1641,9 @@ body.touch {
     height: 64px;
   }
 
-  .bar-txt b {
-    font-size: 12px;
+  .fab-btn {
+    width: 48px;
+    height: 48px;
   }
 
   .action-btn {
@@ -1540,7 +1663,7 @@ body.touch {
   }
 
   .overlay.sheet .panel {
-    padding: 14px 10px calc(16px + env(safe-area-inset-bottom, 0px));
+    padding: 14px 10px calc(50px + env(safe-area-inset-bottom, 0px));
   }
 
   .panel-title {
@@ -1555,7 +1678,7 @@ body.touch {
   .draft-row {
     overflow-x: auto;
     scroll-snap-type: x proximity;
-    padding-bottom: 4px;
+    padding-bottom: 2px;
     scrollbar-width: none;
   }
 
@@ -1564,18 +1687,31 @@ body.touch {
   }
 
   .draft-card {
-    flex: 1 0 calc(33.333% - 7px);
-    min-width: 104px;
-    padding: 10px 9px;
+    height: 220px;
+    padding: 5px 5px;
     gap: 5px;
   }
 
+  .card-img {
+    height: 58px;
+  }
+
+  .card-art {
+    width: 50px;
+    height: 50px;
+  }
+
+  .ico-card {
+    width: 32px;
+    height: 32px;
+  }
+
   .card-title {
-    font-size: 13px;
+    font-size: 10px;
   }
 
   .card-desc {
-    font-size: 11px;
+    font-size: 8px;
     line-height: 1.35;
   }
 
@@ -1587,17 +1723,61 @@ body.touch {
     font-size: 10px;
   }
 
+  .stat {
+    font-size: 11px;
+  }
+
+  .stat .ico {
+    width: 15px;
+    height: 15px;
+  }
+
+  /* Колония: две компактные вертикальные карточки в ряд — пара для
+     слияния видна сразу, тапать удобно большим пальцем. */
   .colony-card {
-    flex: 1 1 100%;
-    max-width: none;
+    width: auto;
+    height: auto;
+    min-height: 188px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 10px;
   }
 
   .colony-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
 
+  .cell-img {
+    width: 100%;
+    height: 58px;
+    object-fit: contain;
+  }
+
+  .cell-info {
+    gap: 2px;
+  }
+
+  .merge-hint-ok,
+  .merge-hint-no,
+  .merge-hint-dim {
+    font-size: 10px;
+  }
+
+  .merge-bar .primary-btn {
+    flex: 1 1 100%;
+    min-height: 50px;
+    font-size: 15px;
+  }
+
   .slot-grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    grid-template-columns: repeat(auto-fill, 160px);
+  }
+
+  .slot-cell {
+    width: 160px;
+    height: 78px;
   }
 
   .shop-row {
@@ -1627,18 +1807,13 @@ body.touch {
     padding: 2px 8px 8px;
   }
 
-  .bar-row {
-    gap: 6px;
-    padding: 0 8px 8px;
-  }
-
-  .bar-txt i {
-    font-size: 9px;
+  .fab-btn {
+    width: 46px;
+    height: 46px;
   }
 
   .draft-card {
-    flex: 1 0 calc(33.333% - 5px);
-    min-width: 96px;
+    height: 236px;
     padding: 9px 7px;
   }
 }
@@ -1669,22 +1844,25 @@ body.touch {
     padding-bottom: 5px;
   }
 
-  .bar-txt i,
-  .bar-cap {
-    display: none;
-  }
-
-  .bar-btn {
-    min-height: 40px;
-  }
-
-  .hud-hint,
-  .bar-hint {
+  .hud-hint {
     display: none;
   }
 
   .joy-hint {
     --joy-hint: 84px;
+  }
+
+  .draft-card {
+    height: 214px;
+  }
+
+  .card-img {
+    height: 52px;
+  }
+
+  .card-art {
+    width: 46px;
+    height: 46px;
   }
 }
 

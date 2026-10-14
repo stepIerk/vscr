@@ -34,14 +34,14 @@ const game = new Phaser.Game(config);
 window.__game = game;
 window.__ui = ui;
 
-// Restart + colony bound exactly once (UI module guards duplicates).
+// Restart + gather + inventory bound exactly once (UI module guards duplicates).
 ui.bind(() => {
   const scene = game.scene.getScene('Game');
   if (scene) scene.scene.restart();
 });
-ui.bindColony(() => {
+ui.bindGather(() => {
   const scene = game.scene.getScene('Game');
-  if (scene) scene.openColony();
+  if (scene) scene.toggleGatherMode();
 });
 ui.bindArtifacts(() => {
   const scene = game.scene.getScene('Game');

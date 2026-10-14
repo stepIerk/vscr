@@ -45,6 +45,7 @@ export const COLORS = {
   enemyA: 0xff4d5e, // жгутиковый дротик — быстрый, хрупкий
   enemyB: 0xff7a3d, // жгутиковый узел — средний
   enemyC: 0xd63d5e, // бронированный узел — тяжёлый
+  enemyD: 0x8a4fd0, // игломёт — ушибленный фиолет, дальнобойный
   sparkHit: 0xbfe6ff, // искры попадания микробота
   sparkDeath: 0xff4d5e,
   sparkTrail: 0x4da3ff,
@@ -100,8 +101,18 @@ export const ENEMIES = {
   types: [
     { key: 'enemy-a', hp: 2, speed: 150, damage: 10, radius: 13, weight: 0.45, dropChance: 0.4, dropCount: [1, 1] },
     { key: 'enemy-b', hp: 3, speed: 110, damage: 12, radius: 16, weight: 0.35, dropChance: 0.7, dropCount: [1, 1] },
-    { key: 'enemy-c', hp: 6, speed: 70, damage: 16, radius: 21, weight: 0.2, dropChance: 1.0, dropCount: [1, 2] }
-  ]
+    { key: 'enemy-c', hp: 6, speed: 70, damage: 16, radius: 21, weight: 0.2, dropChance: 1.0, dropCount: [1, 2] },
+    // Дальнобойный: открывается только после второго босса (minBosses).
+    { key: 'enemy-d', name: 'Игломёт', hp: 4, speed: 95, damage: 8, radius: 15, weight: 0.22, dropChance: 0.8, dropCount: [1, 2], minBosses: 2 }
+  ],
+  // Игломёт держит дистанцию и плюётся иглами (переиспользует снаряды боссов).
+  shooter: {
+    key: 'enemy-d',
+    shootRange: 280, // комфортная дистанция стрельбы
+    shotCooldownMs: 2300,
+    shotSpeed: 260,
+    shotDmg: 9
+  }
 };
 
 /** +N extra spawn markers per room per hero level above 1. */
@@ -350,6 +361,11 @@ export const ALLIES = {
   mergeBonus: 0.35, // +35% attack & maxHealth per merge level
   mergeSpeedBonus: 0.1, // +10% attack speed & move speed per merge level
   maxMerge: 3,
+  // Биоматериал (БИО) — валюта колонии: слияние стоит, расщепление возвращает.
+  mergeCostBase: 6, // подъём с уровня N → N+1 стоит base * N (6, затем 12)
+  splitBase: 3, // гарантированный возврат за расщепление клетки любого уровня
+  splitRate: 0.6, // доля вложенных в слияния затрат, возвращаемая расщеплением
+  scalePerMerge: 0.18, // насколько вырастает спрайт клетки за уровень слияния
   leashRadius: 150, // allies drift back inside this radius of the hero
   aggroRadius: 760, // allies engage enemies within this range
   dropAggroRadius: 950 // ...and drop targets beyond this range
@@ -378,6 +394,12 @@ export const ALLY_TYPES = {
     role: 'Хрупкий, но неумолимый: очень частые слабые укусы.',
     attack: 3, attackIntervalMs: 300, moveSpeed: 215, maxHealth: 42,
     range: 70, bodyR: 9, tint: 0xb8f53d
+  },
+  medic: {
+    name: 'Медик',
+    role: 'Не атакует: лечит героя и самую раненую клетку рядом.',
+    attack: 4, attackIntervalMs: 1100, moveSpeed: 200, maxHealth: 62,
+    range: 220, bodyR: 10, tint: 0xffc857
   }
 };
 
@@ -473,12 +495,12 @@ export function resolveWithTunnels(fallback, paramName = 'tunnels') {
 }
 
 /** Pick an enemy type by weight. Pure function, easy to unit-test later. */
-export function pickEnemyType(random = Math.random) {
-  const total = ENEMIES.types.reduce((s, t) => s + t.weight, 0);
+export function pickEnemyType(random = Math.random, pool = ENEMIES.types) {
+  const total = pool.reduce((s, t) => s + t.weight, 0);
   let roll = random() * total;
-  for (const t of ENEMIES.types) {
+  for (const t of pool) {
     roll -= t.weight;
     if (roll <= 0) return t;
   }
-  return ENEMIES.types[0];
+  return pool[0];
 }
